@@ -1,0 +1,88 @@
+flowchart TD
+
+    %% --- Styles ---
+    classDef input fill:#E1F5FE,stroke:#01579B,stroke-width:2px;
+    classDef process fill:#F3E5F5,stroke:#7B1FA2,stroke-width:1px;
+    classDef transform fill:#E8F5E9,stroke:#2E7D32,stroke-width:2px;
+    classDef logic fill:#FFF3E0,stroke:#EF6C00,stroke-width:2px;
+    classDef database fill:#336791,stroke:#333,color:white;
+    classDef result fill:#FFEB3B,stroke:#FBC02D,stroke-width:2px;
+
+    %% --- Input Stage ---
+    subgraph Input["Input & Color Space Conversion"]
+        Start((Upload Suspected Image)):::input
+        Format[Image Format Detection]:::process
+        Color[Convert Image to YCbCr]:::process
+        SplitY[Extract Y Component]:::process
+        Start --> Format --> Color --> SplitY
+    end
+
+    %% --- Frequency Domain Decomposition ---
+    subgraph FDD["Frequency Domain Decomposition"]
+        DWT[Perform DWT on Y]:::process
+        HL[Select HL Sub-band]:::process
+        LL[Select LL Sub-band]:::process
+        SplitY --> DWT
+        DWT --> HL
+        DWT --> LL
+    end
+
+    %% --- Tiling and DCT ---
+    subgraph TilesAndDCT["Tiling & DCT"]
+        Tiles[Divide into 128x128 Tiles]:::process
+        Blocks[Divide Tiles into 8x8 Blocks]:::process
+        DCT[Perform Discrete Cosine Transform]:::process
+        HL --> Tiles --> Blocks --> DCT
+    end
+
+    %% --- Watermark Retrieval ---
+    subgraph Watermark["Watermark Retrieval"]
+        QIM_Dec[Extract Bits via QIM Decoding]:::logic
+        Stream[Reconstruct Binary Stream]:::process
+        Flags[Detect Start/End Flags]:::logic
+        DCT --> QIM_Dec --> Stream --> Flags
+    end
+
+    %% --- Metadata Decryption ---
+    subgraph Decryption["Metadata Decryption"]
+        Decrypt[Decrypt Embedded Metadata]:::process
+        ID_Extract[Extract Unique Image ID]:::logic
+        Flags --> Decrypt --> ID_Extract
+    end
+
+    %% --- Fingerprint Verification ---
+    RegenFP[Regenerate Perceptual Fingerprint]:::process
+    LL --> RegenFP
+
+    %% --- Database Comparison ---
+    DB_Query{Query Database<br/>by Image ID}:::database
+    ID_Extract --> DB_Query
+    RegenFP --> DB_Query
+    DB_Query -- "Record Found" --> Compare[Compare Extracted Data<br/>with DB Records]:::logic
+    
+    Unknown@{ shape: dbl-circ, label: "Result: Untrusted / No Watermark" }
+    class Unknown result
+    DB_Query -- "No Record" --> Unknown
+
+    %% --- Final Reporting ---
+    subgraph Reporting["Final Reporting"]
+        Analysis{Analysis Engine}:::logic
+        Auth@{ shape: dbl-circ, label: "Authenticity Result" }
+        Owner@{ shape: dbl-circ, label: "Owner / Source Info" }
+        Tamper@{ shape: dbl-circ, label: "Tampering Status" }
+        class Auth result
+        class Owner result
+        class Tamper result
+        Compare --> Analysis
+        Analysis --> Auth
+        Analysis --> Owner
+        Analysis --> Tamper
+    end
+
+    %% --- Styling Details ---
+    style DB_Query fill:#336791,color:white
+    style Analysis fill:#FF9800,color:white
+
+
+
+    -------------------------------------------------------------------------------------------

@@ -1,0 +1,125 @@
+This technical specification outlines the system architecture for a high-performance **Media Authentication and Invisible Image Watermarking Platform**. Designed for scalability and forensic-grade security, the system leverages a robust **Go (Fiber)** backend, a **React.js** frontend, and a frequency-domain watermarking pipeline utilizing Discrete Wavelet Transform (DWT) and Discrete Cosine Transform (DCT).
+
+---
+
+1. High-Level System Architecture
+
+The platform follows a decoupled, three-tier architecture designed for high throughput and low latency.
+
+A. Frontend Layer (React.js)
+
+User Interface: Provides a responsive dashboard for common users to upload images and view extraction results.
+Authentication State: Manages JWT storage (via HttpOnly cookies or secure memory) and session persistence.
+Client Logic: Handles image pre-validation (file size/format) and asynchronous polling for processing results.
+
+B. Backend Layer (Go Fiber)
+
+API Gateway: Manages routing, request parsing, and response formatting.
+Processing Engine: A specialized module within Go (or a separate worker service) that executes the mathematical watermarking pipelines.
+Storage Interface: Communicates with the PostgreSQL database for metadata and audit logs.
+
+C. Data Layer (Relational Metadata)
+
+PostgreSQL: Stores strictly structured data. No raw image binary data is stored here to ensure database performance and compliance.
+
+---
+
+2. Authentication & Middleware
+
+The system employs a multi-tiered security approach to distinguish between human users and automated services.
+
+Access Control
+
+* Common Users: Authenticated via JWT (JSON Web Tokens) after a standard Login/OIDC flow.
+* Organizations:** Authenticated via X-API-KEY / Secret pairs. These keys are hashed in the database and validated on every request.
+* RBAC (Role-Based Access Control):`User`: Can embed/extract via UI.
+* `Org`: Can perform bulk operations via API.
+* `Admin`: Can manage keys and view system-wide audit logs.
+
+
+
+### Middleware Stack
+
+1. **Rate Limiter:** Prevents DoS attacks; Organizations have higher tiers (e.g., 1000 RPM) compared to Users (e.g., 60 RPM).
+2. **Auth Middleware:** Validates JWT signature or API Key existence.
+3. **Validation:** Enforces strict MIME-type checks (e.g., `image/jpeg`, `image/png`) before the file hits the processing engine.
+4. **Audit Logger:** Captures every request (timestamp, Actor ID, action type, and resulting Image ID) for forensic traceability.
+
+---
+
+## 3. Database Schema Design (Logical)
+
+The database focuses on **provenance** and **integrity**.
+
+| Table | Primary Fields |
+| --- | --- |
+| **Users / Orgs** | `ID`, `Email`, `Hashed_Password`, `Role`, `Org_ID` |
+| **API_Keys** | `Key_Hash`, `Org_ID`, `Scopes`, `Created_At`, `Last_Used` |
+| **Image_Metadata** | `Unique_Image_ID` (PK), `User_ID`, `Image_Hash` (SHA-256), `Perceptual_Fingerprint`, `Format`, `Created_At` |
+| **Watermark_Logs** | `Log_ID`, `Action` (Embed/Extract), `Success_Status`, `Timestamp`, `IP_Address` |
+
+---
+
+## 4. Watermark Embedding Pipeline
+
+This pipeline transforms a standard image into a forensically traceable asset through multi-stage frequency domain manipulation.
+
+### Step 1: Pre-processing & ID Generation
+
+1. **Ingestion:** Image received via Multipart Form.
+2. **Validation:** Format identification (Header check).
+3. **ID Assignment:** A **Unique Image ID** is generated (e.g., UUID v4). This is the primary key for the image's life cycle.
+
+### Step 2: Watermark Construction
+
+1. **Payload Assembly:** Combine `Unique Image ID` + `Encrypted Metadata`.
+2. **Framing:** Append specific start/end bit-flags to ensure the extractor can find the payload boundaries.
+3. **Serialization:** Convert the assembly into a **Binary Byte Stream**.
+
+### Step 3: Frequency Domain Transformation
+
+1. **Color Space Conversion:** Convert image from RGB to **YCbCr**.
+2. **Channel Isolation:** Store  and  (chrominance) for reconstruction; target the  (luminance) component for embedding.
+3. **DWT (Discrete Wavelet Transform):** Apply DWT to the  component to decompose it into sub-bands (LL, LH, HL, HH).
+4. **Fingerprinting:** Generate the **Perceptual Fingerprint** from the **LL (Low-Low)** sub-band (captures the essential structure).
+5. **Targeting:** Select the **HL (High-Low)** sub-band for embedding to balance robustness and invisibility.
+
+### Step 4: Quantization & Embedding
+
+1. **Tiling:** Divide the HL sub-band into  tiles.
+2. **Blocking:** Divide each tile into  blocks.
+3. **DCT (Discrete Cosine Transform):** Perform DCT on each  block.
+4. **QIM Embedding:** Embed 2 bits per  block using **Quantization Index Modulation (QIM)**. This modifies the DCT coefficients to represent 0s and 1s based on predefined step sizes.
+
+### Step 5: Reconstruction
+
+1. Perform **Inverse DCT (IDCT)** on the blocks.
+2. Reconstruct tiles  Sub-bands  Perform **Inverse DWT (IDWT)**.
+3. Re-combine modified  with original  and .
+4. Convert back to original format and output the watermarked image alongside its metadata.
+
+---
+
+## 5. Extraction & Verification Pipeline
+
+The extraction process is an asymmetric "blind" or "semi-blind" retrieval used to verify authenticity.
+
+1. **Signal Retrieval:** Convert the suspected image to YCbCr  DWT  Select HL sub-band.
+2. **De-quantization:** Divide HL into  tiles and  blocks  DCT  Use **QIM Decoding** to extract the binary stream.
+3. **Payload Decoding:** Locate start/end flags  Extract the binary stream  Decrypt the metadata  Retrieve the **Unique Image ID**.
+4. **Integrity Check:**
+* **Fingerprint Comparison:** Regenerate the perceptual fingerprint from the current LL sub-band and compare it with the DB record.
+* **Tamper Detection:** If the extracted ID exists but the fingerprint/hash differs significantly, mark the image as "Tampered."
+
+
+5. **Final Response:** Return the authenticity status, original owner info, and a "Tamper Score."
+
+---
+
+## 6. Scalability & Deployment
+
+* **Concurrency:** Go’s goroutines allow the system to handle multiple image processing requests simultaneously without blocking the main API thread.
+* **Horizontal Scaling:** The stateless nature of the Go Fiber backend allows it to be deployed in Docker containers across a Kubernetes (K8s) cluster.
+* **Storage:** While images aren't in the DB, a transient **S3 Bucket** or **Redis Cache** should be used for the few seconds between upload and the completion of the embedding/extraction pipeline.
+
+Would you like me to elaborate on the specific PostgreSQL table relationships or provide a sample JSON response for the Extraction API?

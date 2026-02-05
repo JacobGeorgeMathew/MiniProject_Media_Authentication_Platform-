@@ -1,0 +1,264 @@
+This document details the system architecture for  a Media Authentication and Invisible Image Watermarking Platform. The system is designed for high scalability, security, and strict separation of concerns, adhering to the specific algorithmic and infrastructural constraints provided.
+
+---
+
+## 1. High-Level System Architecture
+
+The system follows a **Micro-service inspired Monolithic** structure (or Modular Monolith) suitable for high-performance Go processing, communicating with a decoupled React frontend.
+
+### Architectural Diagram (Logical Flow)
+
+```mermaid
+graph TD
+    User[Common User (Web)] -->|HTTPS/JWT| FE[React Frontend]
+    Org[Organization (API)] -->|HTTPS/API Key| LB[Load Balancer / Nginx]
+    FE --> LB
+    LB --> API[Go Fiber Backend API]
+    
+    subgraph "Backend System (Go)"
+        API --> Auth[Auth Middleware]
+        API --> Handlers[Request Handlers]
+        Handlers --> Pipe[Watermarking Pipeline]
+        Pipe --> Embed[Embedding Engine (DWT/DCT/QIM)]
+        Pipe --> Extract[Extraction Engine]
+        Pipe --> Hash[Fingerprinting Service]
+    end
+    
+    subgraph "Data Persistence"
+        Handlers --> DB[(PostgreSQL - Metadata Only)]
+        Handlers --> ObjStore[Object Storage (S3/MinIO) - Optional Image Store]
+    end
+
+```
+
+---
+
+## 2. Frontend Architecture (React.js)
+
+The frontend is a Single Page Application (SPA) optimized for handling binary image data and visualizing verification results.
+
+### Core Modules
+
+* **Auth Module:** Manages Login/Registration forms and JWT storage (HttpOnly cookies or memory).
+* **Upload Manager:**
+* Implements a drag-and-drop zone using `react-dropzone`.
+* Performs client-side validation (file type, size limits) before network requests.
+* **Mode Switcher:** Toggle between "Protect" (Embed) and "Verify" (Extract).
+
+
+* **Visualization Engine:**
+* **Side-by-Side View:** Renders Original vs. Watermarked image.
+* **Metadata Dashboard:** Displays the Unique Image ID, Perceptual Fingerprint, and Trust Score.
+* **Canvas Overlay:** Highlights manipulated regions (if tampering detection is supported).
+
+
+* **API Client Service:** A dedicated Axios/Fetch wrapper to handle multipart/form-data requests and intercept 401 errors for token refreshing.
+
+---
+
+## 3. Backend Architecture (Go Fiber)
+
+The backend is built on **Go (Golang)** using the **Fiber** framework for maximum throughput and low memory footprint.
+
+### A. Middleware Layer
+
+1. **RequestID:** Assigns a unique tracing ID to every incoming request.
+2. **CORS:** Configured strictly for the frontend domain.
+3. **Auth Middleware:**
+* **JWT Parser:** Validates Bearer tokens for UI users.
+* **API Key Validator:** Checks `X-API-KEY` header against the `organizations` table for high-throughput clients.
+
+
+4. **Rate Limiter:**
+* **Standard:** 10 req/min for Common Users.
+* **Premium:** 1000 req/min for Organizations (configurable per API key).
+
+
+5. **Audit Logger:** Asynchronously logs request metadata (User ID, Action, Timestamp, IP) to the database.
+
+### B. API Layer (RESTful Endpoints)
+
+| Method | Endpoint | Access | Description |
+| --- | --- | --- | --- |
+| `POST` | `/api/v1/auth/register` | Public | Register new common user. |
+| `POST` | `/api/v1/auth/login` | Public | Login and receive JWT. |
+| `POST` | `/api/v1/watermark/embed` | Protected | Upload image, embed watermark, return processed image + metadata. |
+| `POST` | `/api/v1/watermark/verify` | Protected | Upload image, extract watermark, return verification status. |
+| `POST` | `/api/v1/org/batch/embed` | Org Only | Bulk processing endpoint. |
+
+---
+
+## 4. Database Design (PostgreSQL)
+
+**Constraint Compliance:** No image BLOBs are stored. Only metadata and references.
+
+### Schema Overview
+
+**1. Users Table**
+
+* `id` (UUID, PK)
+* `email` (VARCHAR, Unique)
+* `password_hash` (VARCHAR)
+* `role` (ENUM: 'user', 'admin')
+
+**2. Organizations Table**
+
+* `id` (UUID, PK)
+* `name` (VARCHAR)
+* `api_key_hash` (VARCHAR)
+* `rate_limit_tier` (INT)
+
+**3. ImageMetadata Table**
+
+* `unique_image_id` (UUID, PK) - *Generated during embedding*
+* `owner_id` (UUID, FK) - *User or Org*
+* `perceptual_fingerprint` (TEXT/JSONB) - *Hash from LL sub-band*
+* `original_image_hash` (SHA-256) - *For integrity checks*
+* `watermark_params` (JSONB) - *Stores QIM step size, strength (encryption required)*
+* `created_at` (TIMESTAMP)
+
+**4. AuditLogs Table**
+
+* `id` (BIGSERIAL)
+* `actor_id` (UUID)
+* `action` (ENUM: 'EMBED', 'VERIFY', 'TAMPER_DETECTED')
+* `image_ref_id` (UUID)
+* `timestamp` (TIMESTAMP)
+
+---
+
+## 5. Watermark Embedding Pipeline (The Engine)
+
+This pipeline is the core logic implemented in Go. It operates entirely in memory or uses temporary file storage for processing.
+
+### Phase 1: Pre-processing & ID Generation
+
+1. **Ingest:** Receive image stream from API.
+2. **Format Check:** Validate Magic Bytes (JPEG, PNG, TIFF). Decode into a raw pixel matrix.
+3. **ID Generation:** Generate a **Unique Image ID** (UUIDv4).
+* *Note: This ID is the primary payload to be embedded.*
+
+
+
+### Phase 2: Payload Construction
+
+1. **Construct Payload:** `[StartFlag]` + `[UniqueID]` + `[EncryptedMetadata]` + `[EndFlag]`.
+2. **Serialization:** Convert the payload string into a binary bitstream.
+3. **Error Correction (Optional):** Apply Reed-Solomon or Hamming coding to the bitstream for robustness.
+
+### Phase 3: Domain Transformation & Embedding
+
+1. **Color Space Conversion:** Convert RGB Image  YCbCr.
+* Store  and  channels (unmodified).
+* Process only the  (Luminance) channel.
+
+
+2. **Discrete Wavelet Transform (DWT):**
+* Apply 1-level DWT on  channel  LL, LH, HL, HH.
+* **Fingerprinting:** Compute Perceptual Hash/Feature Vector from the **LL (Low Frequency)** sub-band. Store this in the DB.
+* **Target Selection:** Select **HL (High-Low)** sub-band for embedding (balance between invisibility and robustness).
+
+
+3. **Tiling & Blocking:**
+* Divide the HL sub-band into **128  128 tiles**.
+* Sub-divide each tile into **8  8 blocks**.
+
+
+4. **Discrete Cosine Transform (DCT):**
+* Apply DCT to each 8  8 block.
+
+
+5. **QIM Embedding:**
+* Select mid-frequency coefficients in the DCT block.
+* **Algorithm:** Embed **2 bits per block** using Quantization Index Modulation (QIM).
+*  where  is the quantization step size and  is the payload bit.
+
+
+6. **Reconstruction:**
+* Inverse DCT (IDCT) on blocks  Modified HL Tiles.
+* Inverse DWT (IDWT) using Modified HL, Original LL, LH, HH  Modified .
+
+
+
+### Phase 4: Finalization
+
+1. **Merge:** Combine Modified  + Original  + .
+2. **Output Conversion:** Convert YCbCr  RGB.
+3. **Encodings:** Encode to requested format (lossless PNG recommended to preserve watermark).
+4. **DB Commit:** Store `Unique Image ID`, `Perceptual Fingerprint`, and `Hash` in PostgreSQL.
+
+---
+
+## 6. Watermark Extraction & Verification Pipeline
+
+This reverse pipeline verifies authenticity and detects tampering.
+
+### Phase 1: Input & Transform
+
+1. **Ingest:** Receive suspected image.
+2. **Color Space:** Convert RGB  YCbCr.
+3. **Decomposition:**
+* Extract  channel.
+* Perform DWT on   Extract HL sub-band.
+
+
+
+### Phase 2: Extraction
+
+1. **Blocking:** Divide HL into 128  128 tiles  8  8 blocks.
+2. **DCT:** Perform DCT on each block.
+3. **QIM Decoding:**
+* Examine quantization levels of selected coefficients.
+* Determine nearest centroid to extract bits (0 or 1).
+
+
+4. **Bitstream Assembly:** Concatenate extracted bits.
+
+### Phase 3: Verification Logic
+
+1. **Parsing:**
+* Scan for `[StartFlag]` and `[EndFlag]`.
+* Extract the binary payload between flags.
+
+
+2. **Decryption:** Decrypt metadata and extract the **Unique Image ID**.
+3. **Fingerprint Check:**
+* Generate a fresh Perceptual Fingerprint from the **LL** sub-band of the suspected image.
+* Query DB using the extracted **Unique Image ID**.
+* Compare the fresh fingerprint with the stored `perceptual_fingerprint`.
+
+
+4. **Result Generation:**
+* **Authentic:** ID found, Fingerprint matches (within threshold), Metadata valid.
+* **Tampered:** ID found, Fingerprint mismatch.
+* **Unknown:** No valid ID or flags found.
+
+
+
+---
+
+## 7. Security & Real-World Scalability
+
+### Security Measures
+
+* **Payload Encryption:** All metadata embedded in the image is encrypted using AES-256 before being converted to bits.
+* **Attack Resistance:** The DWT-DCT hybrid approach provides resistance against compression (JPEG), cropping, and noise addition.
+* **No Image Storage:** Mitigates data leakage risks. Even if the DB is compromised, no actual user content is exposed.
+
+### Scalability (SaaS Ready)
+
+* **Stateless Backend:** The Go Fiber API is stateless. It can be horizontally scaled behind a Load Balancer (e.g., Nginx or AWS ALB).
+* **Asynchronous Processing:** For "Organization" bulk uploads, use a Message Queue (RabbitMQ or Redis Streams). The API accepts the request, returns a Job ID, and workers process the watermarking in the background.
+* **Database Partitioning:** The `ImageMetadata` table can be partitioned by `created_at` date as the dataset grows.
+
+### Deployment Stack
+
+* **Containerization:** Docker for API, Frontend, and DB.
+* **Orchestration:** Kubernetes (K8s) for managing Go API replicas.
+* **CI/CD:** GitHub Actions to build and deploy to AWS/GCP.
+
+---
+
+### Next Step
+
+Would you like me to generate the **Go code for the specific QIM Embedding function** (DWT/DCT logic) or the **SQL Schema definitions** to set up the database?
