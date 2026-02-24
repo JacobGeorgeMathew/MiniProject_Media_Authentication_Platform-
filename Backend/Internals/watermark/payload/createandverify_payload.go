@@ -1,4 +1,4 @@
-package watermark
+package payload
 
 import (
 	"encoding/binary"
