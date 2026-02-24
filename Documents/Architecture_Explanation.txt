@@ -123,3 +123,10 @@ The extraction process is an asymmetric "blind" or "semi-blind" retrieval used t
 * **Storage:** While images aren't in the DB, a transient **S3 Bucket** or **Redis Cache** should be used for the few seconds between upload and the completion of the embedding/extraction pipeline.
 
 Would you like me to elaborate on the specific PostgreSQL table relationships or provide a sample JSON response for the Extraction API?
+
+set "PGROOT=C:\Program Files\PostgreSQL\18"
+cd %TEMP%
+git clone --branch v0.8.1 https://github.com/pgvector/pgvector.git
+cd pgvector
+nmake /F Makefile.win
+nmake /F Makefile.win install
