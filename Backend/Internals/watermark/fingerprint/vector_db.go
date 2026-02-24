@@ -1,4 +1,4 @@
-package watermark
+package fingerprint
 
 // qdrant.go — Vector similarity search via Qdrant
 //

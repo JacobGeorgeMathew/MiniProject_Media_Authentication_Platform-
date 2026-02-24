@@ -1,4 +1,5 @@
-package watermark
+package watermarkengine
+
 
 func Identify(Ymatrix [][]float64, c []Constants) (x int, y int, flag bool) {
 	h := len(Ymatrix)

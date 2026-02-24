@@ -1,4 +1,5 @@
-package watermark
+package watermarkengine
+
 
 import (
 	"fmt"
