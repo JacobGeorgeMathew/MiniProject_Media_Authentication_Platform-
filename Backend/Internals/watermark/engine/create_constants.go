@@ -1,4 +1,4 @@
-package watermarkengine
+package engine
 
 import (
 	"math"

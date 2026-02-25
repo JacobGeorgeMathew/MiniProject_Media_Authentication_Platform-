@@ -6,6 +6,7 @@ import (
 
 	"github.com/JacobGeorgeMathew/MiniProject_Media_Authentication_Platform-/Backend/config"
 	"github.com/JacobGeorgeMathew/MiniProject_Media_Authentication_Platform-/Backend/database"
+
 	"github.com/gofiber/fiber"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
@@ -34,21 +35,21 @@ func main() {
 	api := app.Group("/api")
 
 	user := api.Group("/student")
-	user.Post("/register",func (c *fiber.Ctx) error {
+	user.Post("/register",func(c *fiber.Ctx) error {
 
 		return c.status(200).JSON(fiber.Map{
 			"success": "Under Construction",
 		})
 		
 	} )
-	user.Post("/login", func (c *fiber.Ctx) error {
+	user.Post("/login", func(c *fiber.Ctx) error {
 
 		return c.status(200).JSON(fiber.Map{
 			"success": "Under Construction",
 		})
 		
 	})
-	user.Post("/logout", func (c *fiber.Ctx) error {
+	user.Post("/logout", func(c *fiber.Ctx) error {
 
 		return c.status(200).JSON(fiber.Map{
 			"success": "Under Construction",
@@ -56,5 +57,8 @@ func main() {
 		
 	})
 
-	user.POST("watermark",)
+	//user.POST("watermark",)
+
+	fmt.Println("Server Started")
+	log.Fatal(app.Listen("localhost:5000"))
 }
