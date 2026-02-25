@@ -4,7 +4,7 @@ import (
 	//"fmt"
 	"image"
 
-	"github.com/JacobGeorgeMathew/MiniProject_Media_Authentication_Platform-/Backend/internals/watermark/engine/watermarkengine"
+	"github.com/JacobGeorgeMathew/MiniProject_Media_Authentication_Platform-/Backend/internals/watermark/engine"
 	"golang.org/x/image/draw"
 )
 
@@ -34,7 +34,7 @@ func Createfingerprint(img image.Image) []float64 { // Fixed: return the vector
 
 	resized_img := ResizeImage(img, 256, 256)
 
-	_, Ymatrix := watermarkengine.ConvertToYC(resized_img)
+	_, Ymatrix := engine.ConvertToYC(resized_img)
 
 	vector1024d := []float64{} // Fixed: missing {} for slice literal
 
@@ -53,5 +53,5 @@ func Createfingerprint(img image.Image) []float64 { // Fixed: return the vector
 	}
 
 	//fmt.Println(vector1024d) // Fixed: use fmt.Println instead of println for slices
-	return vector1024d       // Fixed: return the fingerprint vector
+	return vector1024d // Fixed: return the fingerprint vector
 }

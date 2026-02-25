@@ -1,4 +1,4 @@
-package watermarkengine
+package engine
 
 
 func Identify(Ymatrix [][]float64, c []Constants) (x int, y int, flag bool) {
