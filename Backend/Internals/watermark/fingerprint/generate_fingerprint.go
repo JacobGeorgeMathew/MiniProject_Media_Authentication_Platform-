@@ -4,7 +4,7 @@ import (
 	//"fmt"
 	"image"
 
-	"github.com/JacobGeorgeMathew/MiniProject_Media_Authentication_Platform-/Backend/internals/watermark/watermarkengine"
+	"github.com/JacobGeorgeMathew/MiniProject_Media_Authentication_Platform-/Backend/internals/watermark/engine/watermarkengine"
 	"golang.org/x/image/draw"
 )
 
