@@ -1,7 +1,12 @@
 package engine
 
+import "image"
 
-func Identify(Ymatrix [][]float64, c []Constants) (x int, y int, flag bool) {
+func Identify(img image.Image, c []Constants) (x int, y int, flag bool) {
+
+	_, Ymatrix := ConvertToYC(img)
+
+
 	h := len(Ymatrix)
 	w := len(Ymatrix[0])
 

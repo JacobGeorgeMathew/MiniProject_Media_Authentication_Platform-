@@ -3,6 +3,7 @@ package payload
 import (
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"hash/crc32"
 )
 
@@ -22,7 +23,7 @@ import (
 // ---------------------------------------------------------------------------
 
 const (
-	PayloadVersion  = 1
+	PayloadVersion   = 1
 	PayloadTotalBits = 136
 
 	startFlagVal uint16 = 0xF0F0 // 1111 0000 1111 0000
@@ -90,8 +91,9 @@ func bitsToUint64(bits []int) uint64 {
 }
 
 // buildProtectedBytes serialises the region covered by the CRC (10 bytes):
-//   byte 0   : VERSION (high nibble) | FLAGS (low nibble)
-//   bytes 1-8: MetadataID big-endian
+//
+//	byte 0   : VERSION (high nibble) | FLAGS (low nibble)
+//	bytes 1-8: MetadataID big-endian
 func buildProtectedBytes(fields PayloadFields) []byte {
 	buf := make([]byte, 9)
 	flagsByte := (fields.Version & 0x0F) << 4
@@ -115,7 +117,8 @@ func computeCRC(protected []byte) uint32 {
 // PayloadGenerate builds the 136-bit watermark payload as a slice of ints (0/1).
 //
 // Layout:
-//   START_FLAG(16) | VERSION(4) | IS_AI(1) | RESERVED(3) | METADATA_ID(64) | CRC32(32) | END_FLAG(16)
+//
+//	START_FLAG(16) | VERSION(4) | IS_AI(1) | RESERVED(3) | METADATA_ID(64) | CRC32(32) | END_FLAG(16)
 func PayloadGenerate(fields PayloadFields) ([]int, error) {
 	if fields.Version > 15 {
 		return nil, errors.New("version must fit in 4 bits (0-15)")
@@ -176,17 +179,20 @@ type ParseResult struct {
 
 // parsePayload decodes a single 136-bit payload slice.
 func parsePayload(bits []int) ParseResult {
-	if len(bits) != PayloadTotalBits {
+	if len(bits) < PayloadTotalBits {
+		fmt.Println("error in PayloadTotalBits , length = ", len(bits), " PAYload total bits", PayloadTotalBits)
 		return ParseResult{Err: "wrong payload length"}
 	}
 
 	// Validate start flag
 	if bitsToUint16(bits[0:16]) != startFlagVal {
+		fmt.Println(" error in startFlagVal")
 		return ParseResult{Err: "start flag mismatch"}
 	}
 
 	// Validate end flag
 	if bitsToUint16(bits[120:136]) != endFlagVal {
+		fmt.Println("Error in endfalag ")
 		return ParseResult{Err: "end flag mismatch"}
 	}
 
@@ -203,7 +209,7 @@ func parsePayload(bits []int) ParseResult {
 		MetadataID: metadataID,
 	}
 
-	// Verify CRC
+	//Verify CRC
 	protected := buildProtectedBytes(fields)
 	expectedCRC := computeCRC(protected)
 	if embeddedCRC != expectedCRC {
@@ -273,6 +279,6 @@ func PayloadVerify(payloads [][]int) (PayloadFields, error) {
 			best = c
 		}
 	}
-
+	println("Payload verify success ")
 	return best.fields, nil
 }

@@ -30,14 +30,16 @@ type QdrantDB struct {
 
 // NewQdrantDB connects to a running Qdrant instance.
 // addr is the host:port of the gRPC endpoint, e.g. "localhost:6334"
-func NewQdrantDB(ctx context.Context, addr string) (*QdrantDB, error) {
+func NewQdrantDB(host string, port int) (*QdrantDB, error) {
+
 	client, err := qdrant.NewClient(&qdrant.Config{
-		Host: "localhost",
-		Port: 6334,
+		Host: host,
+		Port: port,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("connect to qdrant: %w", err)
 	}
+
 	return &QdrantDB{client: client}, nil
 }
 

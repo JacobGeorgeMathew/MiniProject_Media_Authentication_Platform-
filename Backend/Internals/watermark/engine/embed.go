@@ -21,7 +21,7 @@ func PutBlock(matrix [][]float64, block [][]float64, x, y int) {
 	}
 }
 
-func EmbedWatermark(img image.Image, payload []int, c []Constants) (*image.YCbCr , bool) {
+func EmbedWatermark(img image.Image, payload []int, c []Constants) (*image.YCbCr, bool) {
 	stream := payload
 
 	//fmt.Printf("payload: \"%s\" -> %d bits (including flags)\n", payload, len(stream))
@@ -29,9 +29,9 @@ func EmbedWatermark(img image.Image, payload []int, c []Constants) (*image.YCbCr
 	ycb, Ymatrix := ConvertToYC(img)
 
 	fmt.Printf("Image converted to YCbCr, Y matrix size: %dx%d\n", len(Ymatrix[0]), len(Ymatrix))
-	_ , _ , flag := Identify(Ymatrix,c)
+	_, _, flag := Identify(img, c)
 	if flag {
-		return ycb , true
+		return ycb, false
 	}
 	h := len(Ymatrix)
 	w := len(Ymatrix[0])
@@ -63,17 +63,17 @@ func EmbedWatermark(img image.Image, payload []int, c []Constants) (*image.YCbCr
 	for i := 0; i < numTilesY; i++ {
 		for j := 0; j < numTilesX; j++ {
 			tileCount++
-			
-				// Get the tile from the Y matrix (spatial domain, not DWT yet)
-				tile := GetBlock(Ymatrix, j*256, i*256, 256)
 
-				// Embed watermark in this tile
-				// DWT will be performed inside EmbedinaTile on 16x16 blocks
-				modifiedTile := EmbedinaTile(tile, stream, c)
+			// Get the tile from the Y matrix (spatial domain, not DWT yet)
+			tile := GetBlock(Ymatrix, j*256, i*256, 256)
 
-				// Put the modified tile back
-				PutBlock(Ymatrix, modifiedTile, j*256, i*256)
-			
+			// Embed watermark in this tile
+			// DWT will be performed inside EmbedinaTile on 16x16 blocks
+			modifiedTile := EmbedinaTile(tile, stream, c)
+
+			// Put the modified tile back
+			PutBlock(Ymatrix, modifiedTile, j*256, i*256)
+
 			fmt.Printf("✓ Tile [%d,%d] (tile #%d): Watermark embedded\n", i, j, tileCount)
 		}
 	}
@@ -81,7 +81,9 @@ func EmbedWatermark(img image.Image, payload []int, c []Constants) (*image.YCbCr
 	// Update the Y component with the modified matrix
 	Modify_YComponent(ycb, Ymatrix)
 
+	
+
 	fmt.Println("Watermark embedding completed successfully")
 
-	return ycb , false
+	return ycb, true
 }

@@ -77,9 +77,9 @@ func ExtractWatermark(img image.Image, c []Constants) ([][]int, bool) {
 	fmt.Println("Extraction started")
 	fmt.Printf("Image Y matrix dimensions: %dx%d\n", len(Ymatrix[0]), len(Ymatrix))
 
-	x_index, y_index, _ := Identify(Ymatrix, c)
+	x_index, y_index, _ := Identify(img, c)
 
-	fmt.Println("X_index : ",x_index, "Y_index : ", y_index)
+	fmt.Println("X_index : ", x_index, "Y_index : ", y_index)
 
 	h := len(Ymatrix)
 	w := len(Ymatrix[0])
@@ -98,17 +98,31 @@ func ExtractWatermark(img image.Image, c []Constants) ([][]int, bool) {
 
 	fmt.Printf("Processing %d x %d = %d tiles\n", numTilesY, numTilesX, numTilesY*numTilesX)
 	fmt.Println("----------------------------------------")
-	extractedBits := make([][]int,numTilesX * numTilesY)
+	extractedBits := make([][]int, numTilesX*numTilesY)
 	for i := x_index; i < numTilesY; i++ {
 		for j := y_index; j < numTilesX; j++ {
-			
 
 			// Get the tile from the Y matrix (not DWT transformed)
 			tile := GetBlock(Ymatrix, j*256, i*256, 256)
 
 			// Extract bits from this tile (DWT happens inside ExtractfromaTile)
-			copy(extractedBits[tileCount],ExtractfromaTile(tile, c))
-			// tile_status := true
+			extractedBits[tileCount] = ExtractfromaTile(tile, c)
+
+			fmt.Println("Length of one payload : ", len(extractedBits[tileCount]))
+			
+			tileCount++
+		}
+	}
+
+	// fmt.Println("----------------------------------------")
+	// fmt.Printf("Summary: %d/%d tiles verified successfully (%.1f%%)\n",
+	// 	validTileCount, tileCount, float64(validTileCount)*100.0/float64(tileCount))
+	// fmt.Printf("Total messages found: %d\n", len(messages))
+
+	return extractedBits, true
+}
+
+// tile_status := true
 			// // if tile_status {
 			// // 	validTileCount++
 			// // }
@@ -132,14 +146,3 @@ func ExtractWatermark(img image.Image, c []Constants) ([][]int, bool) {
 			// 	fmt.Printf("✗ Tile [%d,%d] (tile #%d): NOT VERIFIED & no message\n",
 			// 		i, j, tileCount)
 			// }
-			tileCount++
-		}
-	}
-
-	// fmt.Println("----------------------------------------")
-	// fmt.Printf("Summary: %d/%d tiles verified successfully (%.1f%%)\n",
-	// 	validTileCount, tileCount, float64(validTileCount)*100.0/float64(tileCount))
-	// fmt.Printf("Total messages found: %d\n", len(messages))
-
-	return extractedBits, true
-}
