@@ -26,7 +26,7 @@ func qimExtract(c float64, delta float64) int {
 }
 
 func PerformEmbed(block [][]float64, bits []int, c []Constants) {
-	alpha := 50.0
+	alpha := 100.0
 
 	// Calculate current DCT coefficient
 	coff1 := c[0].FindValueOptimized(block)
@@ -52,7 +52,7 @@ func PerformEmbed(block [][]float64, bits []int, c []Constants) {
 }
 
 func PerformExtract(block [][]float64, c *Constants) int {
-	alpha := 50.0
+	alpha := 100.0
 
 	// Calculate DCT coefficient
 	coff := c.FindValueOptimized(block)
