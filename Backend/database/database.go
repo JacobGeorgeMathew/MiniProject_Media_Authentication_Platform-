@@ -1,26 +1,26 @@
 package database
 
 import (
-	"database/sql"
-	"github.com/JacobGeorgeMathew/MiniProject_Media_Authentication_Platform-/Backend/config"
+	"context"
 
-	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/JacobGeorgeMathew/MiniProject_Media_Authentication_Platform-/Backend/config"
 )
 
-func Connect(cfg *config.Config) (*sql.DB, error) {
-	db, err := sql.Open("pgx", cfg.DatabaseURL)
+// Connect creates a pgxpool connection pool.
+// pgxpool is required by the repository layer (pgvector uses pgx native types).
+func Connect(cfg *config.Config) (*pgxpool.Pool, error) {
+	pool, err := pgxpool.New(context.Background(), cfg.DatabaseURL)
 	if err != nil {
 		return nil, err
 	}
 
-	// Test the connection
-	if err := db.Ping(); err != nil {
+	// Verify the connection is live before returning.
+	if err := pool.Ping(context.Background()); err != nil {
+		pool.Close()
 		return nil, err
 	}
 
-	// Set connection pool settings
-	// db.SetMaxOpenConns(25)
-	// db.SetMaxIdleConns(5)
-
-	return db, nil
+	return pool, nil
 }

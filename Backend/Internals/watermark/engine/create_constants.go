@@ -4,27 +4,27 @@ import (
 	"math"
 )
 
-type Constants struct {
-	U            int
-	V            int
-	Const_matrix [8][8]float64
-	Uk           float64
-	Vk           float64
-	Nc           float64
-}
+// type Constants struct {
+// 	U            int
+// 	V            int
+// 	Const_matrix [8][8]float64
+// 	Uk           float64
+// 	Vk           float64
+// 	Nc           float64
+// }
 
-func (d *Constants) FindValueOptimized(block [][]float64) float64 {
+// func (d *Constants) FindValueOptimized(block [][]float64) float64 {
 
-	// Calculate DCT coefficient
-	total := 0.0
-	for y := 0; y < 8; y++ {
-		for x := 0; x < 8; x++ {
-			total += block[x][y] * d.Const_matrix[y][x]
-		}
-	}
+// 	// Calculate DCT coefficient
+// 	total := 0.0
+// 	for y := 0; y < 8; y++ {
+// 		for x := 0; x < 8; x++ {
+// 			total += block[x][y] * d.Const_matrix[y][x]
+// 		}
+// 	}
 
-	return d.Nc * total
-}
+// 	return d.Nc * total
+// }
 
 func CreateConstant(u int, v int) *Constants {
 	d := new(Constants)

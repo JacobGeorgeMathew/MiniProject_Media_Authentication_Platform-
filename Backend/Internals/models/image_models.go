@@ -6,55 +6,39 @@ import (
 	"github.com/google/uuid"
 )
 
-// ImageMetadata mirrors the image_metadata table.
-// Pointer fields represent nullable columns.
-// type ImageMetadata struct {
-// 	ID             uuid.UUID
-// 	SubmittedBy    *uuid.UUID // FK → users.id (nullable)
-// 	Title          *string
-// 	Description    *string
-// 	SourceURL      *string
-// 	ExternalRefID  *string
-// 	ChecksumSHA256 *string
-// 	MimeType       *string
-// 	WidthPx        *int
-// 	HeightPx       *int
+// User maps directly to the `users` table.
+type User struct {
+	ID           uuid.UUID `db:"id"`
+	Username     string    `db:"username"`
+	Email        string    `db:"email"`
+	PasswordHash string    `db:"password_hash"`
+	FullName     *string   `db:"full_name"`
+	IsActive     bool      `db:"is_active"`
+	CreatedAt    time.Time `db:"created_at"`
+	UpdatedAt    time.Time `db:"updated_at"`
+}
 
-// 	// AI analysis
-// 	IsAIGenerated bool
-// 	AIConfidence  *float64 // 0.0 – 1.0
-// 	AIModelUsed   *string
-// 	ContentFlags  []string
-
-// 	// Location (all optional)
-// 	LocationLabel *string
-// 	Latitude      *float64
-// 	Longitude     *float64
-
-// 	// Classification
-// 	Category *string
-// 	Tags     []string
-
-// 	// Qdrant sync status
-// 	IsIndexed    bool
-// 	IndexedAt    *time.Time
-// 	IndexVersion *string
-
-// 	CapturedAt *time.Time
-// 	CreatedAt  time.Time
-// 	UpdatedAt  time.Time
-// }
-
+// ImageMetadata maps directly to the `image_metadata` table.
 type ImageMetadata struct {
-	ID            uuid.UUID
-	SerialID      int64 // ← new: the watermark-embedded key
-	Title         *string
-	Description   *string
-	MimeType      *string
-	WidthPx       *int
-	HeightPx      *int
-	IsAIGenerated bool
-	CapturedAt    *time.Time
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	ID            uuid.UUID  `db:"id"`
+	SerialID      int64      `db:"serial_id"`
+	UserID        *uuid.UUID `db:"user_id"`   // nullable FK
+	Title         *string    `db:"title"`
+	Description   *string    `db:"description"`
+	MimeType      string     `db:"mime_type"`
+	WidthPx       int        `db:"width_px"`
+	HeightPx      int        `db:"height_px"`
+	IsAIGenerated bool       `db:"is_ai_generated"`
+	CapturedAt    *time.Time `db:"captured_at"` // nullable — not all images have EXIF
+	CreatedAt     time.Time  `db:"created_at"`
+	UpdatedAt     time.Time  `db:"updated_at"`
+}
+
+// ImageVector maps directly to the `image_vectors` table.
+// The raw []float32 slice is what you pass to pgvector.NewVector().
+type ImageVector struct {
+	ID        uuid.UUID `db:"id"`
+	ImageID   uuid.UUID `db:"image_id"`
+	Vector    []float32 `db:"vector"`
+	CreatedAt time.Time `db:"created_at"`
 }
