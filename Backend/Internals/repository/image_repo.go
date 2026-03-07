@@ -1,306 +1,76 @@
-// package repository
-
-// import (
-// 	"context"
-// 	"database/sql"
-// 	"fmt"
-
-// 	//"time"
-// 	"github.com/JacobGeorgeMathew/MiniProject_Media_Authentication_Platform-/Backend/internals/models"
-
-// 	"github.com/google/uuid"
-// 	//"github.com/jackc/pgx/v5/pgxpool"
-// )
-
-// // ---------------------------------------------------------------------------
-// // Connection pool
-// // ---------------------------------------------------------------------------
-
-// // DB wraps the standard sql.DB (already connected via your database.go)
-// type DB struct {
-//     pool *sql.DB
-// }
-
-// // NewDB wraps an already-connected *sql.DB from your existing database.go.
-// // You pass in the result of your Connect() function directly.
-// func NewDB(sqlDB *sql.DB) *DB {
-//     return &DB{pool: sqlDB}
-// }
-
-// // Close shuts down the connection pool.
-// func (db *DB) Close() { db.pool.Close() }
-
-// // ---------------------------------------------------------------------------
-// // Domain types
-// // ---------------------------------------------------------------------------
-
-// // ---------------------------------------------------------------------------
-// // Image Metadata — Write operations
-// // ---------------------------------------------------------------------------
-
-// // InsertImageMetadata inserts a new metadata record and returns its generated UUID.
-// // is_indexed defaults to FALSE — call MarkAsIndexed after storing in Qdrant.
-// func (db *DB) InsertImageMetadata(ctx context.Context, m models.ImageMetadata) (uuid.UUID, error) {
-// 	const q = `
-// 		INSERT INTO image_metadata (
-// 			submitted_by, title, description, source_url, external_ref_id,
-// 			checksum_sha256, mime_type, width_px, height_px,
-// 			is_ai_generated, ai_confidence, ai_model_used, content_flags,
-// 			location_label, latitude, longitude,
-// 			category, tags, captured_at
-// 		) VALUES (
-// 			$1,$2,$3,$4,$5,
-// 			$6,$7,$8,$9,
-// 			$10,$11,$12,$13,
-// 			$14,$15,$16,
-// 			$17,$18,$19
-// 		)
-// 		RETURNING id`
-
-// 	var id uuid.UUID
-// 	err := db.pool.QueryRowContext(ctx, q,          // ← QueryRowContext, not QueryRow
-// 		m.SubmittedBy, m.Title, m.Description, m.SourceURL, m.ExternalRefID,
-// 		m.ChecksumSHA256, m.MimeType, m.WidthPx, m.HeightPx,
-// 		m.IsAIGenerated, m.AIConfidence, m.AIModelUsed, m.ContentFlags,
-// 		m.LocationLabel, m.Latitude, m.Longitude,
-// 		m.Category, m.Tags, m.CapturedAt,
-// 	).Scan(&id)
-// 	if err != nil {
-// 		return uuid.Nil, fmt.Errorf("insert image_metadata: %w", err)
-// 	}
-// 	return id, nil
-// }
-
-// // MarkAsIndexed updates the Qdrant sync status after the fingerprint vector
-// // has been successfully stored in Qdrant.
-// // Call this immediately after a successful QdrantDB.StoreFingerprint.
-// func (db *DB) MarkAsIndexed(ctx context.Context, id uuid.UUID, version string) error {
-// 	_, err := db.pool.ExecContext(ctx, `   -- ← ExecContext, not Exec
-// 		UPDATE image_metadata
-// 		SET is_indexed    = TRUE,
-// 		    indexed_at    = NOW(),
-// 		    index_version = $2
-// 		WHERE id = $1`,
-// 		id, version,
-// 	)
-// 	if err != nil {
-// 		return fmt.Errorf("mark as indexed: %w", err)
-// 	}
-// 	return nil
-// }
-
-// // MarkAsUnindexed resets the Qdrant sync flag, e.g. after a Qdrant delete or failure.
-// func (db *DB) MarkAsUnindexed(ctx context.Context, id uuid.UUID) error {
-// 	_, err := db.pool.ExecContext(ctx, `   -- ← ExecContext, not Exec
-// 		UPDATE image_metadata
-// 		SET is_indexed    = FALSE,
-// 		    indexed_at    = NULL,
-// 		    index_version = NULL
-// 		WHERE id = $1`,
-// 		id,
-// 	)
-// 	return err
-// }
-
-// // SetAIFlag updates the AI-generation analysis fields for an existing image.
-// func (db *DB) SetAIFlag(ctx context.Context, id uuid.UUID, isAI bool, confidence float64, model string) error {
-// 	_, err := db.pool.ExecContext(ctx, `   -- ← ExecContext, not Exec
-// 		UPDATE image_metadata
-// 		SET is_ai_generated = $2,
-// 		    ai_confidence   = $3,
-// 		    ai_model_used   = $4
-// 		WHERE id = $1`,
-// 		id, isAI, confidence, model,
-// 	)
-// 	if err != nil {
-// 		return fmt.Errorf("set ai flag: %w", err)
-// 	}
-// 	return nil
-// }
-
-// // SoftDeleteImage marks an image as deleted without removing the row.
-// // Also call QdrantDB.DeleteFingerprint for the same UUID to remove the vector.
-// func (db *DB) SoftDeleteImage(ctx context.Context, id uuid.UUID) error {
-// 	_, err := db.pool.ExecContext(ctx,     // ← ExecContext, not Exec
-// 		`UPDATE image_metadata SET is_deleted = TRUE WHERE id = $1`, id)
-// 	if err != nil {
-// 		return fmt.Errorf("soft delete image: %w", err)
-// 	}
-// 	return nil
-// }
-
-// // ---------------------------------------------------------------------------
-// // Image Metadata — Read operations
-// // ---------------------------------------------------------------------------
-
-// // GetImageMetadata fetches a single metadata row by its UUID.
-// func (db *DB) GetImageMetadata(ctx context.Context, id uuid.UUID) (*models.ImageMetadata, error) {
-// 	const q = `
-// 		SELECT id, submitted_by, title, description, source_url, external_ref_id,
-// 		       checksum_sha256, mime_type, width_px, height_px,
-// 		       is_ai_generated, ai_confidence, ai_model_used, content_flags,
-// 		       location_label, latitude, longitude,
-// 		       category, tags,
-// 		       is_indexed, indexed_at, index_version,
-// 		       captured_at, created_at, updated_at
-// 		FROM image_metadata
-// 		WHERE id = $1 AND is_deleted = FALSE`
-
-// 	m := &models.ImageMetadata{}
-// 	err := db.pool.QueryRowContext(ctx, q, id).Scan(  // ← QueryRowContext, not QueryRow
-// 		&m.ID, &m.SubmittedBy, &m.Title, &m.Description, &m.SourceURL, &m.ExternalRefID,
-// 		&m.ChecksumSHA256, &m.MimeType, &m.WidthPx, &m.HeightPx,
-// 		&m.IsAIGenerated, &m.AIConfidence, &m.AIModelUsed, &m.ContentFlags,
-// 		&m.LocationLabel, &m.Latitude, &m.Longitude,
-// 		&m.Category, &m.Tags,
-// 		&m.IsIndexed, &m.IndexedAt, &m.IndexVersion,
-// 		&m.CapturedAt, &m.CreatedAt, &m.UpdatedAt,
-// 	)
-// 	if err != nil {
-// 		return nil, fmt.Errorf("get image_metadata %s: %w", id, err)
-// 	}
-// 	return m, nil
-// }
-
-// // GetImageMetadataBatch fetches multiple metadata rows by a slice of UUIDs in one query.
-// // Used after a Qdrant similarity search returns a list of matching IDs.
-// // The returned map is keyed by UUID for easy lookup.
-// func (db *DB) GetImageMetadataBatch(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]*models.ImageMetadata, error) {
-// 	if len(ids) == 0 {
-// 		return map[uuid.UUID]*models.ImageMetadata{}, nil
-// 	}
-
-// 	// Convert []uuid.UUID to []string for the ANY($1::uuid[]) binding
-// 	idStrs := make([]string, len(ids))
-// 	for i, id := range ids {
-// 		idStrs[i] = id.String()
-// 	}
-
-// 	const q = `
-// 		SELECT id, submitted_by, title, description, source_url, external_ref_id,
-// 		       checksum_sha256, mime_type, width_px, height_px,
-// 		       is_ai_generated, ai_confidence, ai_model_used, content_flags,
-// 		       location_label, latitude, longitude,
-// 		       category, tags,
-// 		       is_indexed, indexed_at, index_version,
-// 		       captured_at, created_at, updated_at
-// 		FROM image_metadata
-// 		WHERE id = ANY($1::uuid[]) AND is_deleted = FALSE`
-
-// 	rows, err := db.pool.QueryContext(ctx, q, idStrs)  // ← QueryContext, not Query
-// 	if err != nil {
-// 		return nil, fmt.Errorf("batch get image_metadata: %w", err)
-// 	}
-// 	defer rows.Close()
-
-// 	result := make(map[uuid.UUID]*models.ImageMetadata, len(ids))
-// 	for rows.Next() {
-// 		m := &models.ImageMetadata{}
-// 		err := rows.Scan(
-// 			&m.ID, &m.SubmittedBy, &m.Title, &m.Description, &m.SourceURL, &m.ExternalRefID,
-// 			&m.ChecksumSHA256, &m.MimeType, &m.WidthPx, &m.HeightPx,
-// 			&m.IsAIGenerated, &m.AIConfidence, &m.AIModelUsed, &m.ContentFlags,
-// 			&m.LocationLabel, &m.Latitude, &m.Longitude,
-// 			&m.Category, &m.Tags,
-// 			&m.IsIndexed, &m.IndexedAt, &m.IndexVersion,
-// 			&m.CapturedAt, &m.CreatedAt, &m.UpdatedAt,
-// 		)
-// 		if err != nil {
-// 			return nil, fmt.Errorf("scan image_metadata row: %w", err)
-// 		}
-// 		result[m.ID] = m
-// 	}
-// 	return result, rows.Err()
-// }
-
-// // GetUnindexedImages returns images not yet sent to Qdrant.
-// // Useful for a background job that re-indexes failed or missing entries.
-// func (db *DB) GetUnindexedImages(ctx context.Context, limit int) ([]models.ImageMetadata, error) {
-// 	const q = `
-// 		SELECT id, submitted_by, title, description, source_url, external_ref_id,
-// 		       checksum_sha256, mime_type, width_px, height_px,
-// 		       is_ai_generated, ai_confidence, ai_model_used, content_flags,
-// 		       location_label, latitude, longitude,
-// 		       category, tags,
-// 		       is_indexed, indexed_at, index_version,
-// 		       captured_at, created_at, updated_at
-// 		FROM image_metadata
-// 		WHERE is_deleted = FALSE AND is_indexed = FALSE
-// 		ORDER BY created_at ASC
-// 		LIMIT $1`
-
-// 	rows, err := db.pool.QueryContext(ctx, q, limit)  // ← QueryContext, not Query
-// 	if err != nil {
-// 		return nil, fmt.Errorf("get unindexed images: %w", err)
-// 	}
-// 	defer rows.Close()
-
-// 	var results []models.ImageMetadata
-// 	for rows.Next() {
-// 		m := models.ImageMetadata{}
-// 		err := rows.Scan(
-// 			&m.ID, &m.SubmittedBy, &m.Title, &m.Description, &m.SourceURL, &m.ExternalRefID,
-// 			&m.ChecksumSHA256, &m.MimeType, &m.WidthPx, &m.HeightPx,
-// 			&m.IsAIGenerated, &m.AIConfidence, &m.AIModelUsed, &m.ContentFlags,
-// 			&m.LocationLabel, &m.Latitude, &m.Longitude,
-// 			&m.Category, &m.Tags,
-// 			&m.IsIndexed, &m.IndexedAt, &m.IndexVersion,
-// 			&m.CapturedAt, &m.CreatedAt, &m.UpdatedAt,
-// 		)
-// 		if err != nil {
-// 			return nil, fmt.Errorf("scan unindexed image: %w", err)
-// 		}
-// 		results = append(results, m)
-// 	}
-// 	return results, rows.Err()
-// }
-
 package repository
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
-	"strings"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
+	pgvector "github.com/pgvector/pgvector-go"
 
 	"github.com/JacobGeorgeMathew/MiniProject_Media_Authentication_Platform-/Backend/internals/models"
-	"github.com/google/uuid"
 )
 
+const (
+	SIMILARITY_CUTOFF = 0.95
+	TOP_K             = 10
+)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ImageRepository interface
+// ─────────────────────────────────────────────────────────────────────────────
+
+type ImageRepository interface {
+	InsertImageMetadata(ctx context.Context, m models.ImageMetadata) (uuid.UUID, int64, error)
+	InsertImageWithVector(ctx context.Context, userID uuid.UUID, title, description, mimeType string, w, h int, isAIGenerated bool, vec []float64) (uuid.UUID, int64, error)
+	UpdateImageVector(ctx context.Context, imageID uuid.UUID, vec []float64) error
+	GetImageMetadataBySerialID(ctx context.Context, serialID int64) (*models.ImageMetadata, error)
+	GetImageMetadata(ctx context.Context, id uuid.UUID) (*models.ImageMetadata, error)
+	GetImageMetadataBatch(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]*models.ImageMetadata, error) // ← fixed signature
+	FindSimilarImages(ctx context.Context, vec []float64) ([]SearchResult, error)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SearchResult — returned by FindSimilarImages
+// ─────────────────────────────────────────────────────────────────────────────
+
+type SearchResult struct {
+	Metadata   models.ImageMetadata
+	Similarity float64
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DB — concrete pgxpool-backed repository
+// ─────────────────────────────────────────────────────────────────────────────
+
 type DB struct {
-	pool *sql.DB
+	pool *pgxpool.Pool
 }
 
-func NewDB(sqlDB *sql.DB) *DB {
-	return &DB{pool: sqlDB}
+func NewImageRepo(pool *pgxpool.Pool) *DB {
+	return &DB{pool: pool}
 }
 
-// InsertImageMetadata inserts a new record and returns both the UUID and the
-// serial_id (BIGSERIAL). The serial_id is what gets embedded in the watermark.
+// ─────────────────────────────────────────────────────────────────────────────
+// InsertImageMetadata
+// ─────────────────────────────────────────────────────────────────────────────
+
 func (db *DB) InsertImageMetadata(
 	ctx context.Context,
 	m models.ImageMetadata,
 ) (uuid.UUID, int64, error) {
-
-	query := `
-    INSERT INTO image_metadata (
-        title,
-        description,
-        mime_type,
-        width_px,
-        height_px,
-        is_ai_generated,
-        captured_at
-    )
-    VALUES ($1,$2,$3,$4,$5,$6,$7)
-    RETURNING id, serial_id;
-    `
+	const q = `
+		INSERT INTO image_metadata (
+			user_id, title, description, mime_type, width_px, height_px,
+			is_ai_generated, captured_at, created_at, updated_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
+		RETURNING id, serial_id`
 
 	var id uuid.UUID
 	var serialID int64
 
-	err := db.pool.QueryRowContext(
-		ctx, query,
+	err := db.pool.QueryRow(ctx, q,
+		m.UserID,
 		m.Title,
 		m.Description,
 		m.MimeType,
@@ -309,169 +79,230 @@ func (db *DB) InsertImageMetadata(
 		m.IsAIGenerated,
 		m.CapturedAt,
 	).Scan(&id, &serialID)
-
 	if err != nil {
-		return uuid.Nil, 0, err
+		return uuid.Nil, 0, fmt.Errorf("InsertImageMetadata: %w", err)
 	}
-
 	return id, serialID, nil
 }
 
-// GetImageMetadataBySerialID looks up a row using the watermark-embedded serial_id.
+// ─────────────────────────────────────────────────────────────────────────────
+// InsertImageWithVector
+// ─────────────────────────────────────────────────────────────────────────────
+
+// InsertImageWithVector inserts image_metadata and image_vectors atomically.
+func (db *DB) InsertImageWithVector(
+	ctx context.Context,
+	userID uuid.UUID,
+	title, description, mimeType string,
+	w, h int,
+	isAIGenerated bool,
+	vec []float64,
+) (uuid.UUID, int64, error) {
+	tx, err := db.pool.Begin(ctx)
+	if err != nil {
+		return uuid.Nil, 0, fmt.Errorf("InsertImageWithVector begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	var imageID uuid.UUID
+	var serialID int64
+
+	err = tx.QueryRow(ctx, `
+		INSERT INTO image_metadata (
+			user_id, title, description, mime_type, width_px, height_px,
+			is_ai_generated, created_at, updated_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
+		RETURNING id, serial_id
+	`, userID, title, description, mimeType, w, h, isAIGenerated).Scan(&imageID, &serialID)
+	if err != nil {
+		return uuid.Nil, 0, fmt.Errorf("metadata insert: %w", err)
+	}
+
+	pgVec := pgvector.NewVector(float32Slice(vec))
+	_, err = tx.Exec(ctx, `
+		INSERT INTO image_vectors (image_id, vector, created_at)
+		VALUES ($1, $2, NOW())
+	`, imageID, pgVec)
+	if err != nil {
+		return uuid.Nil, 0, fmt.Errorf("vector insert: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return uuid.Nil, 0, fmt.Errorf("InsertImageWithVector commit: %w", err)
+	}
+	return imageID, serialID, nil
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GetImageMetadataBySerialID
+// ─────────────────────────────────────────────────────────────────────────────
+
 func (db *DB) GetImageMetadataBySerialID(
 	ctx context.Context,
 	serialID int64,
 ) (*models.ImageMetadata, error) {
+	const q = `
+		SELECT id, serial_id, user_id, title, description, mime_type,
+		       width_px, height_px, is_ai_generated, captured_at, created_at, updated_at
+		FROM image_metadata
+		WHERE serial_id = $1`
 
-	query := `
-    SELECT
-        id,
-        serial_id,
-        title,
-        description,
-        mime_type,
-        width_px,
-        height_px,
-        is_ai_generated,
-        captured_at,
-        created_at,
-        updated_at
-    FROM image_metadata
-    WHERE serial_id = $1;
-    `
-
-	var m models.ImageMetadata
-	err := db.pool.QueryRowContext(ctx, query, serialID).Scan(
-		&m.ID,
-		&m.SerialID,
-		&m.Title,
-		&m.Description,
-		&m.MimeType,
-		&m.WidthPx,
-		&m.HeightPx,
-		&m.IsAIGenerated,
-		&m.CapturedAt,
-		&m.CreatedAt,
-		&m.UpdatedAt,
-	)
+	m, err := scanImageMetadata(db.pool.QueryRow(ctx, q, serialID))
 	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, nil
-		}
-		return nil, err
+		return nil, fmt.Errorf("GetImageMetadataBySerialID(%d): %w", serialID, err)
 	}
-
-	return &m, nil
+	return m, nil
 }
 
-// GetImageMetadata fetches by UUID (still useful for Qdrant results).
+// ─────────────────────────────────────────────────────────────────────────────
+// GetImageMetadata
+// ─────────────────────────────────────────────────────────────────────────────
+
 func (db *DB) GetImageMetadata(
 	ctx context.Context,
 	id uuid.UUID,
 ) (*models.ImageMetadata, error) {
+	const q = `
+		SELECT id, serial_id, user_id, title, description, mime_type,
+		       width_px, height_px, is_ai_generated, captured_at, created_at, updated_at
+		FROM image_metadata
+		WHERE id = $1`
 
-	query := `
-    SELECT
-        id,
-        serial_id,
-        title,
-        description,
-        mime_type,
-        width_px,
-        height_px,
-        is_ai_generated,
-        captured_at,
-        created_at,
-        updated_at
-    FROM image_metadata
-    WHERE id = $1;
-    `
-
-	var m models.ImageMetadata
-	err := db.pool.QueryRowContext(ctx, query, id).Scan(
-		&m.ID,
-		&m.SerialID,
-		&m.Title,
-		&m.Description,
-		&m.MimeType,
-		&m.WidthPx,
-		&m.HeightPx,
-		&m.IsAIGenerated,
-		&m.CapturedAt,
-		&m.CreatedAt,
-		&m.UpdatedAt,
-	)
+	m, err := scanImageMetadata(db.pool.QueryRow(ctx, q, id))
 	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, nil
-		}
-		return nil, err
+		return nil, fmt.Errorf("GetImageMetadata(%s): %w", id, err)
 	}
-
-	return &m, nil
+	return m, nil
 }
 
-// GetImageMetadataBatch fetches multiple rows by UUID slice (for Qdrant results).
+// ─────────────────────────────────────────────────────────────────────────────
+// GetImageMetadataBatch  (fixed: []uuid.UUID, not []models.ImageMetadata)
+// ─────────────────────────────────────────────────────────────────────────────
+
 func (db *DB) GetImageMetadataBatch(
 	ctx context.Context,
 	ids []uuid.UUID,
 ) (map[uuid.UUID]*models.ImageMetadata, error) {
-
 	if len(ids) == 0 {
-		return map[uuid.UUID]*models.ImageMetadata{}, nil
+		return make(map[uuid.UUID]*models.ImageMetadata), nil
 	}
 
-	placeholders := make([]string, len(ids))
-	args := make([]interface{}, len(ids))
-	for i, id := range ids {
-		placeholders[i] = fmt.Sprintf("$%d", i+1)
-		args[i] = id
-	}
+	const q = `
+		SELECT id, serial_id, user_id, title, description, mime_type,
+		       width_px, height_px, is_ai_generated, captured_at, created_at, updated_at
+		FROM image_metadata
+		WHERE id = ANY($1)`
 
-	query := fmt.Sprintf(`
-    SELECT
-        id,
-        serial_id,
-        title,
-        description,
-        mime_type,
-        width_px,
-        height_px,
-        is_ai_generated,
-        captured_at,
-        created_at,
-        updated_at
-    FROM image_metadata
-    WHERE id IN (%s);
-    `, strings.Join(placeholders, ","))
-
-	rows, err := db.pool.QueryContext(ctx, query, args...)
+	rows, err := db.pool.Query(ctx, q, ids)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("GetImageMetadataBatch query: %w", err)
 	}
 	defer rows.Close()
 
-	result := make(map[uuid.UUID]*models.ImageMetadata)
+	result := make(map[uuid.UUID]*models.ImageMetadata, len(ids))
 	for rows.Next() {
-		var m models.ImageMetadata
+		m, err := scanImageMetadata(rows)
+		if err != nil {
+			return nil, fmt.Errorf("GetImageMetadataBatch scan: %w", err)
+		}
+		result[m.ID] = m
+	}
+	return result, rows.Err()
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// UpdateImageVector
+// ─────────────────────────────────────────────────────────────────────────────
+
+// UpdateImageVector replaces the stored vector for an existing image row.
+// Called after watermark embedding to persist the real fingerprint instead of
+// the placeholder zero vector written during the initial transaction.
+func (db *DB) UpdateImageVector(
+	ctx context.Context,
+	imageID uuid.UUID,
+	vec []float64,
+) error {
+	pgVec := pgvector.NewVector(float32Slice(vec))
+	_, err := db.pool.Exec(ctx, `
+		UPDATE image_vectors SET vector = $1 WHERE image_id = $2
+	`, pgVec, imageID)
+	if err != nil {
+		return fmt.Errorf("UpdateImageVector(%s): %w", imageID, err)
+	}
+	return nil
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FindSimilarImages — pgvector cosine ANN search (no Qdrant)
+// ─────────────────────────────────────────────────────────────────────────────
+
+func (db *DB) FindSimilarImages(
+	ctx context.Context,
+	vec []float64,
+) ([]SearchResult, error) {
+	pgVec := pgvector.NewVector(float32Slice(vec))
+	distanceCutoff := 1.0 - SIMILARITY_CUTOFF
+
+	rows, err := db.pool.Query(ctx, `
+		SELECT
+			m.id, m.user_id, m.serial_id, m.title, m.description,
+			m.mime_type, m.width_px, m.height_px, m.is_ai_generated,
+			m.captured_at, m.created_at, m.updated_at,
+			1 - (v.vector <=> $1::vector) AS similarity
+		FROM image_vectors v
+		JOIN image_metadata m ON m.id = v.image_id
+		WHERE (v.vector <=> $1::vector) <= $2
+		ORDER BY v.vector <=> $1::vector
+		LIMIT $3
+	`, pgVec, distanceCutoff, TOP_K)
+	if err != nil {
+		return nil, fmt.Errorf("FindSimilarImages query: %w", err)
+	}
+	defer rows.Close()
+
+	var results []SearchResult
+	for rows.Next() {
+		var r models.ImageMetadata
+		var sim float64
 		err := rows.Scan(
-			&m.ID,
-			&m.SerialID,
-			&m.Title,
-			&m.Description,
-			&m.MimeType,
-			&m.WidthPx,
-			&m.HeightPx,
-			&m.IsAIGenerated,
-			&m.CapturedAt,
-			&m.CreatedAt,
-			&m.UpdatedAt,
+			&r.ID, &r.UserID, &r.SerialID, &r.Title, &r.Description,
+			&r.MimeType, &r.WidthPx, &r.HeightPx, &r.IsAIGenerated,
+			&r.CapturedAt, &r.CreatedAt, &r.UpdatedAt,
+			&sim,
 		)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("FindSimilarImages scan: %w", err)
 		}
-		result[m.ID] = &m
+		results = append(results, SearchResult{Metadata: r, Similarity: sim})
 	}
+	return results, rows.Err()
+}
 
-	return result, rows.Err()
+// ─────────────────────────────────────────────────────────────────────────────
+// helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+type scanner interface {
+	Scan(dest ...any) error
+}
+
+func scanImageMetadata(s scanner) (*models.ImageMetadata, error) {
+	var m models.ImageMetadata
+	err := s.Scan(
+		&m.ID, &m.SerialID, &m.UserID, &m.Title, &m.Description,
+		&m.MimeType, &m.WidthPx, &m.HeightPx, &m.IsAIGenerated,
+		&m.CapturedAt, &m.CreatedAt, &m.UpdatedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return &m, nil
+}
+
+func float32Slice(in []float64) []float32 {
+	out := make([]float32, len(in))
+	for i, v := range in {
+		out[i] = float32(v)
+	}
+	return out
 }

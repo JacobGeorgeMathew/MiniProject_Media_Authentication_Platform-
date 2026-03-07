@@ -2,276 +2,317 @@ package handlers
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"image"
-
-	//"image/jpeg"
-	"image/jpeg"
-	"image/png"
-	"io"
+	_ "image/jpeg"
+	_ "image/png"
+	"strconv"
 	"strings"
-	"time"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/google/uuid"
 
+	"github.com/JacobGeorgeMathew/MiniProject_Media_Authentication_Platform-/Backend/internals/api/utils"
 	"github.com/JacobGeorgeMathew/MiniProject_Media_Authentication_Platform-/Backend/internals/services"
 )
 
-// ImageHandler holds a reference to the service layer
+// ─────────────────────────────────────────────────────────────────────────────
+// ImageHandler
+// ─────────────────────────────────────────────────────────────────────────────
+
 type ImageHandler struct {
-	imageService *services.ImageService
+	svc *services.ImageService
 }
 
-// NewImageHandler creates a new ImageHandler
-func NewImageHandler(imageService *services.ImageService) *ImageHandler {
-	return &ImageHandler{
-		imageService: imageService,
-	}
+func NewImageHandler(svc *services.ImageService) *ImageHandler {
+	return &ImageHandler{svc: svc}
 }
 
-// -----------------------------------------------------------------------
-// REQUEST STRUCTS
-// -----------------------------------------------------------------------
+// ─────────────────────────────────────────────────────────────────────────────
+// Wire types
+// ─────────────────────────────────────────────────────────────────────────────
 
-// EmbedMetadata is the JSON structure expected in the "metadata" form field
-// when calling the watermark endpoint.
-type EmbedMetadata struct {
-	Title         *string `json:"title"`
-	Description   *string `json:"description"`
+type similarImageItem struct {
+	ImageID       string  `json:"image_id"`
+	Title         *string `json:"title,omitempty"`
+	Description   *string `json:"description,omitempty"`
+	MimeType      string  `json:"mime_type"`
+	Width         int     `json:"width_px"`
+	Height        int     `json:"height_px"`
 	IsAIGenerated bool    `json:"is_ai_generated"`
-	// CapturedAt is optional; expected as RFC3339 string e.g. "2024-01-15T10:30:00Z"
-	CapturedAt *string `json:"captured_at"`
+	Similarity    float64 `json:"similarity"`
 }
 
-// -----------------------------------------------------------------------
-// RESPONSE STRUCTS
-// -----------------------------------------------------------------------
-
-// WatermarkResponse is returned when watermarking fails (JSON error body).
-// On success the handler streams the image directly with a custom header
-// carrying the base64-encoded fingerprint.
-type errorResponse struct {
-	Error string `json:"error"`
+type watermarkChannelInfo struct {
+	ImageID       string  `json:"image_id"`
+	SerialID      int64   `json:"serial_id"`
+	Title         *string `json:"title,omitempty"`
+	Description   *string `json:"description,omitempty"`
+	MimeType      string  `json:"mime_type"`
+	Width         int     `json:"width_px"`
+	Height        int     `json:"height_px"`
+	IsAIGenerated bool    `json:"is_ai_generated"`
 }
 
-// -----------------------------------------------------------------------
-// HANDLER 1 — Embed watermark
-// -----------------------------------------------------------------------
-//
-// Expects multipart/form-data with:
-//   - "image"    → image file  (JPEG or PNG)
-//   - "metadata" → JSON string (EmbedMetadata)
-//
-// Returns:
-//   - The watermarked image as the response body (same format as input)
-//   - Header  X-Fingerprint: <comma-separated float64 values>
-//   - Header  X-Image-ID:    <uuid of the stored metadata record>
+type authResponse struct {
+	WatermarkChannel *watermarkChannelInfo `json:"watermark_channel,omitempty"`
+	SimilarImages    []similarImageItem    `json:"similar_images"`
+	TamperScore      float64               `json:"tamper_score"`
+}
 
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/v1/images/watermark   [protected — registered users only]
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ImageWatermarkHandler embeds a watermark into the uploaded image and returns
+// the watermarked binary alongside metadata headers.
+//
+// Multipart form fields:
+//
+//	image           — image file (JPEG / PNG / TIFF / BMP / WebP)
+//	title           — human-readable label           (optional, defaults to filename)
+//	description     — free-text description          (optional)
+//	is_ai_generated — "true" / "false"               (optional, default false)
 func (h *ImageHandler) ImageWatermarkHandler(c *fiber.Ctx) error {
 
-	// ── 1. Receive image ──────────────────────────────────────────────
+	// ── Parse image file ─────────────────────────────────────────────────────
 	fileHeader, err := c.FormFile("image")
 	if err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(errorResponse{
-			Error: "field 'image' is required (multipart/form-data)",
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "missing 'image' field in form",
 		})
 	}
 
-	src, err := fileHeader.Open()
+	file, err := fileHeader.Open()
 	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(errorResponse{
-			Error: "could not open uploaded image",
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "failed to open uploaded file",
 		})
 	}
-	defer src.Close()
+	defer file.Close()
 
-	imgBytes, err := io.ReadAll(src)
+	img, _, err := image.Decode(file)
 	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(errorResponse{
-			Error: "could not read uploaded image",
+		return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{
+			"error": "could not decode image: " + err.Error(),
 		})
 	}
 
-	img, format, err := image.Decode(bytes.NewReader(imgBytes))
+	// ── Form fields ──────────────────────────────────────────────────────────
+	title := c.FormValue("title", fileHeader.Filename)
+	description := c.FormValue("description", "") // ← new field
+	mimeType := fileHeader.Header.Get("Content-Type")
+	if mimeType == "" {
+		mimeType = "application/octet-stream"
+	}
+	isAI := strings.EqualFold(c.FormValue("is_ai_generated", "false"), "true")
+
+	// ── User ID from auth middleware ─────────────────────────────────────────
+	userID, err := userIDFromLocals(c)
 	if err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(errorResponse{
-			Error: "invalid image file: " + err.Error(),
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"error": "missing or invalid authentication",
 		})
 	}
 
-	// ── 2. Receive & parse metadata ───────────────────────────────────
-	metaStr := c.FormValue("metadata")
-	if metaStr == "" {
-		return c.Status(fiber.StatusBadRequest).JSON(errorResponse{
-			Error: "field 'metadata' is required (JSON string)",
-		})
-	}
-
-	var embedMeta EmbedMetadata
-	if err := json.Unmarshal([]byte(metaStr), &embedMeta); err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(errorResponse{
-			Error: "invalid metadata JSON: " + err.Error(),
-		})
-	}
-
-	// ── 3. Resolve MIME type ──────────────────────────────────────────
-	mimeType := "image/" + format
-	if format == "jpg" {
-		mimeType = "image/jpeg"
-		format = "jpeg"
-	}
-
-	// ── 4. Parse optional CapturedAt timestamp ────────────────────────
-	var capturedAt *time.Time
-	if embedMeta.CapturedAt != nil && *embedMeta.CapturedAt != "" {
-		t, err := time.Parse(time.RFC3339, *embedMeta.CapturedAt)
-		if err != nil {
-			return c.Status(fiber.StatusBadRequest).JSON(errorResponse{
-				Error: "invalid captured_at format, expected RFC3339 (e.g. 2024-01-15T10:30:00Z)",
-			})
+	// ── Call service ─────────────────────────────────────────────────────────
+	result, err := h.svc.EmbedWatermarkInImage(c.Context(), img, services.EmbedRequest{
+		UserID:        userID,
+		Title:         title,
+		Description:   description, // ← forwarded
+		MimeType:      mimeType,
+		IsAIGenerated: isAI,
+	})
+	if err != nil {
+		if strings.Contains(err.Error(), "already watermarked") {
+			return c.Status(fiber.StatusConflict).JSON(fiber.Map{"error": err.Error()})
 		}
-		capturedAt = &t
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "watermark embedding failed: " + err.Error(),
+		})
 	}
 
-	// ── 5. Build service request ──────────────────────────────────────
-	serviceReq := services.EmbedRequest{
-		Title:         embedMeta.Title,
-		Description:   embedMeta.Description,
-		MimeType:      &mimeType,
-		IsAIGenerated: embedMeta.IsAIGenerated,
-		CapturedAt:    capturedAt,
-	}
-
-	// ── 6. Call service ───────────────────────────────────────────────
-	watermarkedImg, fingerprint, err := h.imageService.EmbedWatermarkInImage(c.Context(), img, serviceReq)
-	if err != nil {
-		// "already watermarked" is a 409 Conflict, everything else is 500
-		status := fiber.StatusInternalServerError
-		if err.Error() == "image is already watermarked" {
-			status = fiber.StatusConflict
-		}
-		return c.Status(status).JSON(errorResponse{Error: err.Error()})
-	}
-
-	// ── 7. Encode watermarked image into memory buffer ────────────────
+	// ── Encode watermarked image and stream back ──────────────────────────────
 	var buf bytes.Buffer
-
-	// switch format {
-	// case "jpeg":
-	// 	err = jpeg.Encode(&buf, watermarkedImg, &jpeg.Options{Quality: 92})
-	// default: // png and everything else
-	// 	err = png.Encode(&buf, watermarkedImg)
-	// 	format = "png"
-	// }
-	if true {
-	err = png.Encode(&buf, watermarkedImg)
-	format = "png"
-	} else {
-		err = jpeg.Encode(&buf, watermarkedImg, &jpeg.Options{Quality: 92})
-	}
-
-	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(errorResponse{
-			Error: "failed to encode watermarked image: " + err.Error(),
+	if err := utils.EncodeImageToWriter(&buf, result.WatermarkedImage, mimeType); err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "failed to encode watermarked image",
 		})
 	}
 
-	// ── 8. Attach fingerprint as response header ──────────────────────
-	// Serialise []float64 → JSON array and put it in X-Fingerprint header.
-	fpJSON, err := json.Marshal(fingerprint)
-	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(errorResponse{
-			Error: "failed to serialise fingerprint",
-		})
-	}
-
-	// ── 9. Stream image back to client ────────────────────────────────
-	c.Set(fiber.HeaderContentType, "image/"+format)
-	c.Set("Content-Disposition", "attachment; filename=watermarked."+format)
-	c.Set("X-Fingerprint", string(fpJSON)) // e.g. [0.12,0.98, ...]
-
-	return c.Send(buf.Bytes())
+	c.Set("X-Image-ID", result.ImageID.String())
+	c.Set("X-Serial-ID", strconv.FormatInt(result.SerialID, 10))
+	c.Set("Content-Type", mimeType)
+	return c.Status(fiber.StatusOK).Send(buf.Bytes())
 }
 
-// -----------------------------------------------------------------------
-// HANDLER 2 — Authenticate image
-// -----------------------------------------------------------------------
-//
-// Expects multipart/form-data with:
-//   - "image" → image file (JPEG or PNG)
-//   - "k"     → optional integer string, number of similar images to return
-//               (defaults to 5 if omitted)
-//
-// Returns JSON:
-//
-//	{
-//	  "watermark_valid": true,
-//	  "extracted_metadata": { ...models.ImageMetadata fields... },
-//	  "similar_images": [ { ...models.ImageMetadata... }, ... ],
-//	  "similarity_scores": [0.98, 0.94, ...]
-//	}
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/v1/images/authenticate   [protected — registered users only]
+// ─────────────────────────────────────────────────────────────────────────────
 
+// ImageAuthHandler authenticates an uploaded image using the dual-layer
+// watermark + fingerprint strategy. Returns ownership info, similar images,
+// and a tamper score.
+//
+// Multipart form fields:
+//
+//	image — image file to authenticate
+//	k     — max similar images to return (optional, default 5)
 func (h *ImageHandler) ImageAuthHandler(c *fiber.Ctx) error {
+	img, k, err := parseImageAndK(c)
+	if err != nil {
+		return err // response already written inside parseImageAndK
+	}
 
-	// ── 1. Receive image ──────────────────────────────────────────────
+	result, err := h.svc.ImageAuth(c.Context(), img, k)
+	if err != nil {
+		return authErrorResponse(c, err)
+	}
+
+	return c.Status(fiber.StatusOK).JSON(buildAuthResponse(result))
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/v1/verify   [public — no authentication required]
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ImageVerifyHandler allows anyone — even unregistered users — to verify the
+// provenance of an image. It runs the same dual-channel watermark + fingerprint
+// pipeline and returns ownership/tamper information without requiring a JWT.
+//
+// Multipart form fields:
+//
+//	image — image file to verify
+//	k     — max similar images to return (optional, default 5)
+func (h *ImageHandler) ImageVerifyHandler(c *fiber.Ctx) error {
+	img, k, err := parseImageAndK(c)
+	if err != nil {
+		return err
+	}
+
+	result, err := h.svc.VerifyImage(c.Context(), img, k)
+	if err != nil {
+		return authErrorResponse(c, err)
+	}
+
+	return c.Status(fiber.StatusOK).JSON(buildAuthResponse(result))
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// shared helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+// parseImageAndK decodes the "image" form-file and optional "k" parameter.
+// On error it writes the error response itself and returns a non-nil error so
+// the caller can return immediately.
+func parseImageAndK(c *fiber.Ctx) (image.Image, int, error) {
 	fileHeader, err := c.FormFile("image")
 	if err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(errorResponse{
-			Error: "field 'image' is required (multipart/form-data)",
+		_ = c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "missing 'image' field in form",
 		})
+		return nil, 0, err
 	}
 
-	src, err := fileHeader.Open()
+	file, err := fileHeader.Open()
 	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(errorResponse{
-			Error: "could not open uploaded image",
+		_ = c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "failed to open uploaded file",
 		})
+		return nil, 0, err
 	}
-	defer src.Close()
+	defer file.Close()
 
-	imgBytes, err := io.ReadAll(src)
+	img, _, err := image.Decode(file)
 	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(errorResponse{
-			Error: "could not read uploaded image",
+		_ = c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{
+			"error": "could not decode image: " + err.Error(),
 		})
+		return nil, 0, err
 	}
 
-	img, _, err := image.Decode(bytes.NewReader(imgBytes))
-	if err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(errorResponse{
-			Error: "invalid image file: " + err.Error(),
-		})
-	}
-
-	// ── 2. Parse optional k (number of similar images) ────────────────
-	k := 5 // sensible default
-	if kStr := strings.TrimSpace(c.FormValue("k")); kStr != "" {
-		if _, err := fmt.Sscanf(kStr, "%d", &k); err != nil || k < 1 {
-			return c.Status(fiber.StatusBadRequest).JSON(errorResponse{
-				Error: "'k' must be a positive integer",
-			})
+	k := 5
+	if raw := c.FormValue("k", ""); raw != "" {
+		if parsed, parseErr := strconv.Atoi(raw); parseErr == nil && parsed > 0 {
+			k = parsed
 		}
 	}
 
-	// ── 3. Call service ───────────────────────────────────────────────
-	authResult, err := h.imageService.ImageAuth(c.Context(), img, k)
-	if err != nil {
-		// Distinguish "no watermark" (404) from other failures (500)
-		status := fiber.StatusInternalServerError
-		msg := err.Error()
+	return img, k, nil
+}
 
-		switch msg {
-		case "no watermark detected in image":
-			status = fiber.StatusNotFound
-		case "failed to extract watermark",
-			"metadata not found for extracted watermark ID":
-			status = fiber.StatusUnprocessableEntity
-		}
+// authErrorResponse maps service errors to appropriate HTTP statuses.
+func authErrorResponse(c *fiber.Ctx, err error) error {
+	msg := err.Error()
+	switch {
+	case strings.Contains(msg, "no watermark detected"):
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": msg})
+	case strings.Contains(msg, "payload verification failed"):
+		return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{"error": msg})
+	default:
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "image verification failed: " + msg,
+		})
+	}
+}
 
-		return c.Status(status).JSON(errorResponse{Error: msg})
+// buildAuthResponse converts an *AuthResult into the JSON wire type.
+func buildAuthResponse(result *services.AuthResult) authResponse {
+	resp := authResponse{
+		TamperScore:   result.TamperScore,
+		SimilarImages: make([]similarImageItem, 0, len(result.SimilarImages)),
 	}
 
-	// ── 4. Return structured JSON result ──────────────────────────────
-	return c.Status(fiber.StatusOK).JSON(authResult)
+	if result.ExtractedMetadata != nil {
+		m := result.ExtractedMetadata
+		resp.WatermarkChannel = &watermarkChannelInfo{
+			ImageID:       m.ID.String(),
+			SerialID:      m.SerialID,
+			Title:         m.Title,
+			Description:   m.Description,
+			MimeType:      m.MimeType,
+			Width:         m.WidthPx,
+			Height:        m.HeightPx,
+			IsAIGenerated: m.IsAIGenerated,
+		}
+	}
+
+	for i, m := range result.SimilarImages {
+		var sim float64
+		if i < len(result.SimilarityScores) {
+			sim = result.SimilarityScores[i]
+		}
+		resp.SimilarImages = append(resp.SimilarImages, similarImageItem{
+			ImageID:       m.ID.String(),
+			Title:         m.Title,
+			Description:   m.Description,
+			MimeType:      m.MimeType,
+			Width:         m.WidthPx,
+			Height:        m.HeightPx,
+			IsAIGenerated: m.IsAIGenerated,
+			Similarity:    sim,
+		})
+	}
+
+	return resp
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Context helper
+// ─────────────────────────────────────────────────────────────────────────────
+
+// userIDFromLocals reads the UUID injected by the auth middleware under "userID".
+func userIDFromLocals(c *fiber.Ctx) (uuid.UUID, error) {
+	raw := c.Locals("userID")
+	if raw == nil {
+		return uuid.Nil, fmt.Errorf("userID not found in locals")
+	}
+	switch v := raw.(type) {
+	case uuid.UUID:
+		return v, nil
+	case string:
+		return uuid.Parse(v)
+	default:
+		return uuid.Nil, fmt.Errorf("unexpected userID type in locals: %T", raw)
+	}
 }
