@@ -6,10 +6,11 @@ id          UUID (PK)  ◄───────── user_id     UUID (FK, null
 username    VARCHAR               id           UUID (PK)
 email       VARCHAR               serial_id    BIGSERIAL
 password_hash TEXT                title        TEXT
-full_name   TEXT                  mime_type    VARCHAR
-is_active   BOOLEAN               width_px     INTEGER
-created_at  TIMESTAMPTZ           height_px    INTEGER
-updated_at  TIMESTAMPTZ           is_ai_generated BOOLEAN
+full_name   TEXT                  description  TEXT
+is_active   BOOLEAN               mime_type    VARCHAR
+created_at  TIMESTAMPTZ           width_px     INTEGER
+updated_at  TIMESTAMPTZ           height_px    INTEGER
+                                  is_ai_generated BOOLEAN
                                   captured_at  TIMESTAMPTZ
                                   created_at   TIMESTAMPTZ
                                   updated_at   TIMESTAMPTZ
