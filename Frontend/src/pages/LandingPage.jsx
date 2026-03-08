@@ -56,6 +56,12 @@ export default function LandingPage() {
             Verify Image
           </Link>
           <Link
+            to="/enterprise"
+            className="text-xs text-violet-400 hover:text-violet-300 transition-colors px-3 py-1.5 border border-violet-500/30 hover:border-violet-400/60 rounded"
+          >
+            Enterprise
+          </Link>
+          <Link
             to="/login"
             className="text-xs text-slate-400 hover:text-slate-100 transition-colors px-3 py-1.5"
           >
@@ -143,6 +149,44 @@ export default function LandingPage() {
               {i < 4 && <div className="w-8 h-px bg-slate-700 hidden md:block mb-4" />}
             </div>
           ))}
+        </div>
+      </section>
+
+      {/* Enterprise CTA */}
+      <section className="relative z-10 px-8 py-20 max-w-5xl mx-auto">
+        <div className="rounded-2xl border border-violet-500/20 bg-violet-500/5 p-10 text-center relative overflow-hidden">
+          <div className="absolute inset-0 opacity-10 pointer-events-none"
+            style={{
+              backgroundImage: 'radial-gradient(circle at 70% 50%, #8b5cf6 0%, transparent 60%)',
+            }}
+          />
+          <div className="relative z-10">
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-violet-500/30 bg-violet-500/10 text-violet-400 text-xs mb-5">
+              <span className="w-1.5 h-1.5 rounded-full bg-violet-400 animate-pulse"></span>
+              Watermarking-as-a-Service
+            </div>
+            <h2 className="text-3xl font-black text-slate-100 mb-3">
+              Built for Enterprise Scale
+            </h2>
+            <p className="text-sm text-slate-400 max-w-lg mx-auto leading-relaxed mb-8">
+              Integrate MAP's watermarking and authentication APIs directly into your backend.
+              Manage API keys, track usage, and protect millions of images programmatically.
+            </p>
+            <div className="flex items-center justify-center gap-4 flex-wrap">
+              <Link
+                to="/enterprise/register"
+                className="px-6 py-3 bg-violet-500 text-white text-sm font-bold rounded-lg hover:bg-violet-400 transition-all hover:scale-105"
+              >
+                Start free enterprise trial →
+              </Link>
+              <Link
+                to="/enterprise/docs"
+                className="px-6 py-3 border border-violet-500/30 text-violet-300 text-sm rounded-lg hover:border-violet-400/60 hover:text-violet-200 transition-all"
+              >
+                View API docs
+              </Link>
+            </div>
+          </div>
         </div>
       </section>
 
