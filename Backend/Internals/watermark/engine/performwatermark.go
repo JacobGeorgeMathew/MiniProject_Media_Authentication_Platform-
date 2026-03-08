@@ -1,8 +1,8 @@
 package engine
 
-import (
-	//"math"
-)
+import "sync"
+
+//"math"
 
 // func qimembed(c float64, bit int, delta float64) float64 {
 // 	base := math.Floor(c/delta) * delta
@@ -69,67 +69,81 @@ func markatile(tile [][]float64, c []Constants) [][]float64 {
 	bits := make([]int, 2)
 	bits[0] = 1
 	bits[1] = 1
+	var wg sync.WaitGroup
 	// Mark the first row (by = 0, bx = 0, 16, 32, ..., 112)
 	by := 0
 	for bx := 0; bx < 256; bx += 16 {
-		block := GetBlock(tile, bx, by, 16)
-		block_DWT := PerformCompleteDWT(block)
+		wg.Add(1)
+		go func(bx int) {
+			defer wg.Done()
+			block := GetBlock(tile, bx, by, 16)
+			block_DWT := PerformCompleteDWT(block)
 
-		// Embed bit 1 in the HL component
-		PerformEmbed(block_DWT.HL, bits, c)
+			// Embed bit 1 in the HL component
+			PerformEmbed(block_DWT.HL, bits, c)
 
-		modified_block := PerformCompleteIDWT(block_DWT.LL, block_DWT.LH, block_DWT.HL, block_DWT.HH)
-		// Put the modified block back
-		PutBlock(tile, modified_block, bx, by)
+			modified_block := PerformCompleteIDWT(block_DWT.LL, block_DWT.LH, block_DWT.HL, block_DWT.HH)
+			// Put the modified block back
+			PutBlock(tile, modified_block, bx, by)
+		}(bx)
 	}
-
+	wg.Wait()
 	// Mark the first column (bx = 0, by = 16, 32, ..., 112)
 	// Note: (0,0) is already marked above, so start from by=16
 	bx := 0
 	for by = 16; by < 256; by += 16 {
-		block := GetBlock(tile, bx, by, 16)
-		block_DWT := PerformCompleteDWT(block)
+		wg.Add(1)
+		go func(by int) {
+			defer wg.Done()
+			block := GetBlock(tile, bx, by, 16)
+			block_DWT := PerformCompleteDWT(block)
 
-		// Embed bit 1 in the HL component
-		PerformEmbed(block_DWT.HL, bits, c)
+			// Embed bit 1 in the HL component
+			PerformEmbed(block_DWT.HL, bits, c)
 
-		modified_block := PerformCompleteIDWT(block_DWT.LL, block_DWT.LH, block_DWT.HL, block_DWT.HH)
-		// Put the modified block back
-		PutBlock(tile, modified_block, bx, by)
+			modified_block := PerformCompleteIDWT(block_DWT.LL, block_DWT.LH, block_DWT.HL, block_DWT.HH)
+			// Put the modified block back
+			PutBlock(tile, modified_block, bx, by)
+		}(by)
 	}
-
+	wg.Wait()
 	return tile
 }
 
 func EmbedinaTile(tile [][]float64, stream []int, c []Constants) [][]float64 {
-	bitIndex := 0
-	bits := make([]int, 2)
-	// First, mark the tile with verification pattern
-
 	tile = markatile(tile, c)
 
-	// Then embed the actual watermark data in the remaining blocks
-	// Skip first row and first column (they contain the verification pattern)
+	var wg sync.WaitGroup
+	blocksPerRow := (256 / 16) - 1 // 15
+
 	for by := 16; by < 256; by += 16 {
 		for bx := 16; bx < 256; bx += 16 {
+			wg.Add(1)
+			go func(bx, by int) {
+				defer wg.Done()
 
-			block := GetBlock(tile, bx, by, 16)
+				blockRow := (by / 16) - 1
+				blockCol := (bx / 16) - 1
+				bitIndex := (blockRow*blocksPerRow + blockCol) * 2
 
-			block_DWT := PerformCompleteDWT(block)
-			if bitIndex < len(stream) {
-				bits[0] = stream[bitIndex]
-				bits[1] = stream[bitIndex+1]
-				// Embed the bit in the HL component
+				bits := make([]int, 2) // local — no sharing
+				if bitIndex+1 < len(stream) {
+					bits[0] = stream[bitIndex]
+					bits[1] = stream[bitIndex+1]
+				}
+
+				block := GetBlock(tile, bx, by, 16)
+				block_DWT := PerformCompleteDWT(block)
 				PerformEmbed(block_DWT.HL, bits, c)
-				bitIndex += 2
-			}
-			modified_block := PerformCompleteIDWT(block_DWT.LL, block_DWT.LH, block_DWT.HL, block_DWT.HH)
-			// Put the modified block back
-			PutBlock(tile, modified_block, bx, by)
-
+				modified_block := PerformCompleteIDWT(
+					block_DWT.LL, block_DWT.LH, block_DWT.HL, block_DWT.HH,
+				)
+				PutBlock(tile, modified_block, bx, by)
+			}(bx, by)
 		}
 	}
 
+	wg.Wait()
 	return tile
 }
 
