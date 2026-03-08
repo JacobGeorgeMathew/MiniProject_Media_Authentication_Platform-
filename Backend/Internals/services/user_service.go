@@ -4,12 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
+	//"time"
 
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/JacobGeorgeMathew/MiniProject_Media_Authentication_Platform-/Backend/internals/models"
+	//"github.com/JacobGeorgeMathew/MiniProject_Media_Authentication_Platform-/Backend/internals/models"
 )
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -29,48 +30,14 @@ type UserRepository interface {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Request / Response types
+// UserService
 // ─────────────────────────────────────────────────────────────────────────────
 
-// RegisterRequest is the input for creating a new account.
-type RegisterRequest struct {
-	Username string
-	Email    string
-	Password string // plain-text; hashed before storage
-	FullName string
-}
-
-// LoginRequest is the input for authenticating an existing user.
-type LoginRequest struct {
-	Email    string
-	Password string // plain-text; compared against stored hash
-}
-
-// UpdateProfileRequest carries mutable fields the user may change.
-type UpdateProfileRequest struct {
-	UserID   uuid.UUID
-	Username string
-	Email    string
-	FullName string
-}
-
-// ChangePasswordRequest carries the old and new plain-text passwords.
-type ChangePasswordRequest struct {
-	UserID      uuid.UUID
-	OldPassword string
-	NewPassword string
-}
-
-// UserResponse is the safe, outward-facing user representation — it never
-// carries the password hash.
-type UserResponse struct {
-	ID        uuid.UUID  `json:"id"`
-	Username  string     `json:"username"`
-	Email     string     `json:"email"`
-	FullName  *string    `json:"full_name,omitempty"`
-	IsActive  bool       `json:"is_active"`
-	CreatedAt time.Time  `json:"created_at"`
-	UpdatedAt time.Time  `json:"updated_at"`
+// UserService handles user registration, authentication, and profile
+// management.  It is transport-agnostic and has no knowledge of HTTP/gRPC.
+type UserService struct {
+	repo        UserRepository
+	bcryptCost  int
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -86,16 +53,7 @@ var (
 	ErrIncorrectOldPassword = errors.New("old password is incorrect")
 )
 
-// ─────────────────────────────────────────────────────────────────────────────
-// UserService
-// ─────────────────────────────────────────────────────────────────────────────
 
-// UserService handles user registration, authentication, and profile
-// management.  It is transport-agnostic and has no knowledge of HTTP/gRPC.
-type UserService struct {
-	repo        UserRepository
-	bcryptCost  int
-}
 
 // NewUserService constructs a UserService.
 // bcryptCost should be bcrypt.DefaultCost (12) in production; lower it in
@@ -115,8 +73,8 @@ func NewUserService(repo UserRepository, bcryptCost int) *UserService {
 // validates the password, hashes it, and persists the record.
 func (s *UserService) Register(
 	ctx context.Context,
-	req RegisterRequest,
-) (*UserResponse, error) {
+	req models.RegisterRequest,
+) (*models.UserResponse, error) {
 
 	// ── Validate password length ─────────────────────────────────────────────
 	if len(req.Password) < 8 {
@@ -159,7 +117,7 @@ func (s *UserService) Register(
 	}
 
 	// ── Return safe representation ───────────────────────────────────────────
-	return &UserResponse{
+	return &models.UserResponse{
 		ID:       id,
 		Username: u.Username,
 		Email:    u.Email,
@@ -176,8 +134,8 @@ func (s *UserService) Register(
 // The caller is responsible for issuing a session token / JWT.
 func (s *UserService) Login(
 	ctx context.Context,
-	req LoginRequest,
-) (*UserResponse, error) {
+	req models.LoginRequest,
+) (*models.UserResponse, error) {
 
 	u, err := s.repo.GetUserByEmail(ctx, req.Email)
 	if err != nil {
@@ -198,6 +156,7 @@ func (s *UserService) Login(
 		return nil, ErrInvalidCredentials
 	}
 
+
 	return toUserResponse(u), nil
 }
 
@@ -209,7 +168,7 @@ func (s *UserService) Login(
 func (s *UserService) GetByID(
 	ctx context.Context,
 	id uuid.UUID,
-) (*UserResponse, error) {
+) (*models.UserResponse, error) {
 
 	u, err := s.repo.GetUserByID(ctx, id)
 	if err != nil {
@@ -229,8 +188,8 @@ func (s *UserService) GetByID(
 // It does NOT touch the password hash.
 func (s *UserService) UpdateProfile(
 	ctx context.Context,
-	req UpdateProfileRequest,
-) (*UserResponse, error) {
+	req models.UpdateProfileRequest,
+) (*models.UserResponse, error) {
 
 	u, err := s.repo.GetUserByID(ctx, req.UserID)
 	if err != nil {
@@ -270,7 +229,7 @@ func (s *UserService) UpdateProfile(
 // one derived from newPassword.
 func (s *UserService) ChangePassword(
 	ctx context.Context,
-	req ChangePasswordRequest,
+	req models.ChangePasswordRequest,
 ) error {
 
 	if len(req.NewPassword) < 8 {
@@ -335,8 +294,8 @@ func (s *UserService) DeactivateAccount(
 // helper
 // ─────────────────────────────────────────────────────────────────────────────
 
-func toUserResponse(u *models.User) *UserResponse {
-	return &UserResponse{
+func toUserResponse(u *models.User) *models.UserResponse {
+	return &models.UserResponse{
 		ID:        u.ID,
 		Username:  u.Username,
 		Email:     u.Email,
@@ -344,5 +303,6 @@ func toUserResponse(u *models.User) *UserResponse {
 		IsActive:  u.IsActive,
 		CreatedAt: u.CreatedAt,
 		UpdatedAt: u.UpdatedAt,
+		Token: "",
 	}
 }
