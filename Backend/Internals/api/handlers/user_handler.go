@@ -6,6 +6,8 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
 
+	"github.com/JacobGeorgeMathew/MiniProject_Media_Authentication_Platform-/Backend/internals/api/middleware"
+	"github.com/JacobGeorgeMathew/MiniProject_Media_Authentication_Platform-/Backend/internals/models"
 	"github.com/JacobGeorgeMathew/MiniProject_Media_Authentication_Platform-/Backend/internals/services"
 )
 
@@ -73,7 +75,7 @@ func (h *UserHandler) Register(c *fiber.Ctx) error {
 		})
 	}
 
-	resp, err := h.svc.Register(c.Context(), services.RegisterRequest{
+	resp, err := h.svc.Register(c.Context(), models.RegisterRequest{
 		Username: body.Username,
 		Email:    body.Email,
 		Password: body.Password,
@@ -102,35 +104,44 @@ func (h *UserHandler) Register(c *fiber.Ctx) error {
 // dedicated auth middleware once you wire one in.
 // Public endpoint — no auth middleware required.
 func (h *UserHandler) Login(c *fiber.Ctx) error {
-	var body loginBody
-	if err := c.BodyParser(&body); err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "invalid JSON: " + err.Error(),
-		})
-	}
+    var body loginBody
+    if err := c.BodyParser(&body); err != nil {
+        return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+            "error": "invalid JSON: " + err.Error(),
+        })
+    }
 
-	if body.Email == "" || body.Password == "" {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "email and password are required",
-		})
-	}
+    if body.Email == "" || body.Password == "" {
+        return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+            "error": "email and password are required",
+        })
+    }
 
-	resp, err := h.svc.Login(c.Context(), services.LoginRequest{
-		Email:    body.Email,
-		Password: body.Password,
-	})
-	if err != nil {
-		switch {
-		case errors.Is(err, services.ErrInvalidCredentials):
-			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": err.Error()})
-		case errors.Is(err, services.ErrUserInactive):
-			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": err.Error()})
-		default:
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "login failed"})
-		}
-	}
+    resp, err := h.svc.Login(c.Context(), models.LoginRequest{
+        Email:    body.Email,
+        Password: body.Password,
+    })
+    if err != nil {
+        switch {
+        case errors.Is(err, services.ErrInvalidCredentials):
+            return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": err.Error()})
+        case errors.Is(err, services.ErrUserInactive):
+            return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": err.Error()})
+        default:
+            return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "login failed"})
+        }
+    }
 
-	return c.Status(fiber.StatusOK).JSON(resp)
+    // Generate JWT and attach it to the response struct before returning.
+    token, err := middleware.GenerateToken(resp.ID)
+    if err != nil {
+        return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+            "error": "failed to generate token",
+        })
+    }
+    resp.Token = token
+
+    return c.Status(fiber.StatusOK).JSON(resp)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -187,7 +198,7 @@ func (h *UserHandler) UpdateProfile(c *fiber.Ctx) error {
 		})
 	}
 
-	resp, err := h.svc.UpdateProfile(c.Context(), services.UpdateProfileRequest{
+	resp, err := h.svc.UpdateProfile(c.Context(), models.UpdateProfileRequest{
 		UserID:   userID,
 		Username: body.Username,
 		Email:    body.Email,
@@ -234,7 +245,7 @@ func (h *UserHandler) ChangePassword(c *fiber.Ctx) error {
 		})
 	}
 
-	if err := h.svc.ChangePassword(c.Context(), services.ChangePasswordRequest{
+	if err := h.svc.ChangePassword(c.Context(), models.ChangePasswordRequest{
 		UserID:      userID,
 		OldPassword: body.OldPassword,
 		NewPassword: body.NewPassword,
