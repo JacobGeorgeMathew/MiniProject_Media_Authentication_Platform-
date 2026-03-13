@@ -65,7 +65,7 @@ Both channels must independently resolve to the same record for a high-confidenc
 - **Haar DWT (critically sampled)** — Standard one-level forward/inverse Haar Discrete Wavelet Transform. A 256×256 spatial tile produces four 128×128 sub-bands (LL, LH, HL, HH). The HL sub-band is the embedding target.
 - **DCT basis injection (QIM)** — Imperceptible payload encoding in the HL sub-band using Quantisation Index Modulation applied to 16×16 blocks.
 - **Daubechies (db4) DWT fingerprinting** — Multi-level wavelet decomposition producing a 256-D perceptual feature vector for content-based identity lookup.
-- **Vector similarity search** — ANN search (Qdrant) for duplicate and tampered-image detection using cosine similarity with a 95% threshold.
+- **Vector similarity search** — ANN search via **pgvector** (PostgreSQL extension) for duplicate and tampered-image detection using cosine similarity with a 95% threshold.
 - **Pre-computed constant matrices** — DCT basis values baked into the binary at build time via code generation (`gen_constants/main.go` → `constants_data.go`), yielding O(1) runtime lookup.
 
 ---
@@ -150,7 +150,7 @@ Assemble 256-D vector  (64 blocks × 4 orientations)
 L2 Normalisation (unit vector)
     │
     ▼
-Store in Qdrant vector DB keyed to metadata_id
+Store in pgvector (PostgreSQL) keyed to metadata_id
 ```
 
 ---
@@ -193,7 +193,7 @@ PostgreSQL Lookup  →  owner, timestamp, rights metadata
 Generate fresh 256-D fingerprint of query image
     │
     ▼
-Qdrant ANN Search (cosine similarity, threshold 95%)
+pgvector ANN Search (cosine similarity, threshold 95%)
     │
     ▼
 Tamper Score Computation (CRC + spatial consistency +
@@ -268,8 +268,7 @@ The tamper score is a `float64` in `[0.0, 1.0]` returned with every authenticati
 ### Prerequisites
 
 - Go 1.21+
-- PostgreSQL 15+
-- Qdrant (vector database)
+- PostgreSQL 15+ with the **pgvector** extension
 - `goose` or `psql` for database migrations
 
 ### Environment Variables
@@ -278,13 +277,8 @@ The tamper score is a `float64` in `[0.0, 1.0]` returned with every authenticati
 # Server
 PORT=5000
 
-# PostgreSQL
+# PostgreSQL (also serves as the vector store via pgvector extension)
 DATABASE_URL=postgres://user:password@localhost:5432/map_db
-
-# Qdrant
-QDRANT_HOST=localhost
-QDRANT_PORT=6333
-QDRANT_COLLECTION=image_fingerprints
 
 # JWT
 JWT_SECRET=your-user-jwt-secret
@@ -425,7 +419,7 @@ Fetches any user's public profile by UUID.
 
 #### `POST /images/watermark`
 
-Embeds an invisible DWT+DCT watermark, stores metadata in PostgreSQL, and indexes a perceptual fingerprint in Qdrant. Returns the watermarked image as binary.
+Embeds an invisible DWT+DCT watermark, stores metadata in PostgreSQL, and indexes a perceptual fingerprint in pgvector. Returns the watermarked image as binary.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
@@ -447,7 +441,7 @@ Content-Type: image/jpeg           ← mirrors uploaded MIME type
 
 #### `POST /images/authenticate`
 
-Full dual-channel authentication. Extracts watermark payload, verifies CRC, queries PostgreSQL for ownership, and runs Qdrant ANN search.
+Full dual-channel authentication. Extracts watermark payload, verifies CRC, queries PostgreSQL for ownership, and runs pgvector ANN search.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
@@ -752,16 +746,16 @@ Stores the authoritative record of every watermarked image.
 
 **Key tables:**
 
-- `image_metadata` — `serial_id` (BIGSERIAL PK for watermark payload), `id` (UUID for Qdrant lookups), `owner_id`, `enterprise_id` (nullable FK), timestamp, dimensions, content description, embedding parameters (`k`, `u`, `v`)
+- `image_metadata` — `serial_id` (BIGSERIAL PK for watermark payload), `id` (UUID for pgvector lookups), `owner_id`, `enterprise_id` (nullable FK), timestamp, dimensions, content description, embedding parameters (`k`, `u`, `v`)
 - `enterprises` — company accounts
 - `enterprise_api_keys` — bcrypt-hashed keys with 12-char prefix index; raw key never stored
 - `enterprise_api_usage` — append-only billing audit log
 
-> **Design note:** `serial_id` (BIGSERIAL) is used exclusively for watermark payload identification. The UUID `id` continues to serve Qdrant vector fingerprint lookups. This eliminates the lossy UUID↔uint64 conversion bug present in earlier versions.
+> **Design note:** `serial_id` (BIGSERIAL) is used exclusively for watermark payload identification. The UUID `id` continues to serve pgvector fingerprint lookups. This eliminates the lossy UUID↔uint64 conversion bug present in earlier versions.
 
-### Qdrant — Perceptual Fingerprint Index
+### pgvector — Perceptual Fingerprint Index
 
-High-performance ANN index storing 256-D L2-normalised fingerprint vectors keyed to `metadata_id`. Supports sub-millisecond similarity search across millions of indexed images.
+High-performance ANN index built into PostgreSQL via the `pgvector` extension, storing 256-D L2-normalised fingerprint vectors keyed to `metadata_id`. Supports sub-millisecond similarity search across millions of indexed images with no separate infrastructure required.
 
 - **Similarity metric:** Cosine similarity
 - **Match threshold:** >95%
@@ -787,4 +781,4 @@ A compromised user token must not grant access to enterprise management or billi
 
 ---
 
-*Media Authentication Platform — Built with Go, Fiber, PostgreSQL, and Qdrant.*
+*Media Authentication Platform — Built with Go, Fiber, PostgreSQL, and pgvector.*
