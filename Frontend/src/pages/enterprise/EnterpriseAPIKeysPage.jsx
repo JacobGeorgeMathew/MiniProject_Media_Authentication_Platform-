@@ -44,7 +44,7 @@ export default function EnterpriseAPIKeysPage() {
     setCreating(true);
     try {
       const data = await enterprise.createKey({ name: newKeyName.trim() });
-      setNewKeyFull(data.key || data.api_key || null);
+      setNewKeyFull(data.raw_key || data.key || data.api_key || null);
       setNewKeyName('');
       setShowCreate(false);
       toast.success('API key created');
